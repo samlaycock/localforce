@@ -1,9 +1,17 @@
 # localforce
 
+[![CI](https://github.com/samlaycock/localforce/actions/workflows/ci.yml/badge.svg)](https://github.com/samlaycock/localforce/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/samlaycock/localforce)](https://github.com/samlaycock/localforce/releases)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
+
 A local Salesforce emulator for offline development and testing. It's a single
-Rust binary that speaks Salesforce's REST API and OAuth endpoints, so your app's
-Salesforce client connects to it instead of `login.salesforce.com`. No org,
-network access or code changes are needed.
+Rust binary (or Docker image) that speaks Salesforce's REST API and OAuth
+endpoints, so your app's Salesforce client connects to it instead of
+`login.salesforce.com`. No org, network access or code changes are needed. It's
+a sibling of [localoidc](https://github.com/samlaycock/localoidc),
+[localsaml](https://github.com/samlaycock/localsaml),
+[localmail](https://github.com/samlaycock/localmail) and
+[localflake](https://github.com/samlaycock/localflake).
 
 - **The real API, with real behaviour.** sObject CRUD, upsert by external id,
   describe, SOQL (relationship paths, subqueries, aggregates, date literals),
@@ -30,13 +38,46 @@ network access or code changes are needed.
 > `$Permission`, custom metadata). Test against a real org before relying on
 > behaviour in production.
 
-## Quick start
+## Contents
+
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Connecting an app](#connecting-an-app)
+- [The web UI](#the-web-ui)
+- [Defining custom objects and fields](#defining-custom-objects-and-fields)
+- [What's emulated](#whats-emulated)
+- [Configuration](#configuration)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Installation
+
+**Docker** (linux/amd64 and linux/arm64):
 
 ```sh
-cargo run --release
+docker run --rm -p 9600:9600 -p 9643:9643 -v localforce:/data ghcr.io/samlaycock/localforce
 ```
 
-The server prints its URLs on startup:
+The image is tagged `:<version>`, `:<major>.<minor>` (and `:<major>` from 1.0)
+and `:latest`. It runs as a non-root user and keeps the org in the `/data`
+volume. Pass flags after the image name, e.g. `docker run …
+ghcr.io/samlaycock/localforce --strict-sessions`.
+
+**From source** (needs a recent stable Rust toolchain):
+
+```sh
+cargo install --git https://github.com/samlaycock/localforce --locked
+localforce
+```
+
+Or clone the repository and run `cargo run --release`.
+
+localforce serves HTTP on port 9600 and HTTPS on port 9643, so it can run next
+to localoidc (9400), localsaml (9401) and localmail (9402).
+
+## Quick start
+
+Start localforce with either command above. It prints its URLs on startup:
 
 | What | URL |
 |---|---|
@@ -47,28 +88,21 @@ The server prints its URLs on startup:
 To load your project's custom objects, pass its SFDX folder:
 
 ```sh
-cargo run --release -- --metadata ../my-app/force-app --data-dir .localforce
+localforce --metadata ../my-app/force-app --data-dir .localforce
 ```
 
 `--data-dir` keeps the org (records, and objects made in the UI) between
 restarts. Without it, everything is in memory.
 
-### With Docker
+With Docker, mount your project and point localforce at its SFDX folder and
+config file:
 
 ```sh
-docker build -t localforce .
-docker run -p 9600:9600 -p 9643:9643 localforce
-```
-
-The image keeps the org in `/data` (a volume). To load an SFDX project and a
-config file, mount them and point localforce at them:
-
-```sh
-docker run -p 9600:9600 -p 9643:9643 \
+docker run --rm -p 9600:9600 -p 9643:9643 -v localforce:/data \
   -v "$PWD:/project:ro" \
   -e LOCALFORCE_METADATA=/project/force-app \
   -e LOCALFORCE_CONFIG=/project/localforce.toml \
-  localforce
+  ghcr.io/samlaycock/localforce
 ```
 
 ## Connecting an app
@@ -191,24 +225,60 @@ ids stay the same across restarts and machines.
 Not emulated yet: streaming and events, the Metadata API (beyond reading fields), approval processes, Apex (including Apex
 REST), triggers and flows. See [DESIGN.md](DESIGN.md) for the roadmap.
 
-## Development
+## Configuration
 
-```sh
-cargo test                                   # Rust tests
-cargo clippy --all-targets -- -D warnings
-LOCALFORCE_UI_DIR=ui cargo run               # serve ui/ from disk: edit and reload
-```
+Settings come from flags or `LOCALFORCE_*` environment variables. Users, custom
+objects and custom fields come from `localforce.toml` (see
+[`localforce.example.toml`](localforce.example.toml)).
 
-localforce is tested through the most-used Salesforce client in each of
-three languages: jsforce (Node.js), simple-salesforce (Python) and
-go-salesforce (Go). Their suites share a conformance spec of over 250 cases
-written against Salesforce's behaviour, so the same cases also run against a
-real org, plus `todo` cases for what isn't emulated yet. See
-[tests/README.md](tests/README.md):
+| Flag | Environment variable | Default | |
+|---|---|---|---|
+| `--host` | `LOCALFORCE_HOST` | `127.0.0.1` | Interface to listen on |
+| `--port` | `LOCALFORCE_PORT` | `9600` | HTTP: the APIs, OAuth and the web UI |
+| `--tls-port` | `LOCALFORCE_TLS_PORT` | `9643` | HTTPS, with a generated certificate |
+| `--data-dir` | `LOCALFORCE_DATA_DIR` | none (in memory) | Where the org is kept between restarts |
+| `--config` | `LOCALFORCE_CONFIG` | `localforce.toml` | Users, custom objects and custom fields |
+| `--metadata` | `LOCALFORCE_METADATA` | none | SFDX project or metadata folders, comma-separated or repeated |
+| `--strict-sessions` | `LOCALFORCE_STRICT_SESSIONS` | off | Reject access tokens localforce didn't issue |
 
-```sh
-cargo build
-(cd tests/node && npm ci && npm test)
-(cd tests/python && uv run pytest)
-(cd tests/go && go test -count=1 ./...)
-```
+### State
+
+- Without `--data-dir`, the org is in memory and every start is a clean org.
+- With it, records and objects made in the UI are kept in the SQLite database
+  `org.db` there. Delete the file to start fresh.
+- The HTTPS certificate is generated on the first start and kept in
+  `--data-dir` (or in `localforce` under the system temp directory), so it only
+  needs trusting once. Its path is printed on startup.
+
+### Docker
+
+- In the image, the org and the HTTPS certificate live in `/data`
+  (`LOCALFORCE_DATA_DIR`), and localforce binds `0.0.0.0` (`LOCALFORCE_HOST`).
+- From other containers, use the localforce container's name as the host, e.g.
+  `http://localforce:9600`. The `instance_url` it returns follows the host you
+  used. The certificate only names `localhost` and `127.0.0.1`, so use HTTP
+  between containers.
+
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for how to build, test and release, and how the SDK conformance spec works.
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or https://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or https://opensource.org/licenses/MIT)
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.
+
+## Not affiliated with Salesforce
+
+"Salesforce" is a trademark of Salesforce, Inc. This project is independent and
+interoperates with Salesforce's public APIs and the open-source clients that use
+them.
