@@ -1,0 +1,240 @@
+{
+  "about": "SOQL aggregates: COUNT, COUNT_DISTINCT, SUM, AVG, MIN, MAX, GROUP BY (with ROLLUP and CUBE), GROUPING, HAVING and ordering by aggregates.",
+  "setup": [
+    { "create": "Account", "record": { "Name": "{tag} Grouping" }, "as": "acct" },
+    {
+      "create_many": "Project__c",
+      "records": [
+        { "Name": "{tag} P1", "Status__c": "Planned", "Budget__c": 100, "Headcount__c": 2, "Start_Date__c": "2024-02-10", "Account__c": "{acct}" },
+        { "Name": "{tag} P2", "Status__c": "Active", "Budget__c": 300, "Headcount__c": 5, "Start_Date__c": "2024-11-30", "Account__c": "{acct}" },
+        { "Name": "{tag} P3", "Status__c": "Active", "Budget__c": 600, "Start_Date__c": "2025-06-01" },
+        { "Name": "{tag} P4", "Status__c": "Done", "Headcount__c": 1, "Start_Date__c": "2026-01-15", "Kickoff__c": "2026-01-15T12:00:00Z" }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "COUNT() returns only totalSize",
+      "steps": [{ "query": "SELECT COUNT() FROM Project__c WHERE Name LIKE '{tag}%'", "total": 4, "records": [] }]
+    },
+    {
+      "name": "COUNT(field) counts non-null values; unaliased results are expr0, expr1…",
+      "steps": [
+        {
+          "query": "SELECT COUNT(Id), COUNT(Budget__c), COUNT_DISTINCT(Status__c) FROM Project__c WHERE Name LIKE '{tag}%'",
+          "total": 1,
+          "records": [{ "attributes": { "type": "AggregateResult" }, "expr0": 4, "expr1": 3, "expr2": 3 }]
+        }
+      ]
+    },
+    {
+      "name": "SUM, AVG, MIN and MAX, with aliases",
+      "steps": [
+        {
+          "query": "SELECT SUM(Budget__c) total, AVG(Budget__c) average, MIN(Budget__c) smallest, MAX(Budget__c) largest FROM Project__c WHERE Name LIKE '{tag}%'",
+          "records": [{ "total": 1000, "average": { "$approx": 333.33 }, "smallest": 100, "largest": 600 }]
+        }
+      ]
+    },
+    {
+      "name": "aliases and unaliased results mix, counting only the unaliased",
+      "steps": [
+        {
+          "query": "SELECT COUNT(Id) n, SUM(Budget__c), MAX(Headcount__c) FROM Project__c WHERE Name LIKE '{tag}%'",
+          "records": [{ "n": 4, "expr0": 1000, "expr1": 5 }]
+        }
+      ]
+    },
+    {
+      "name": "aggregates over no records",
+      "steps": [
+        {
+          "query": "SELECT COUNT(Id) n, SUM(Budget__c) total, MAX(Budget__c) top FROM Project__c WHERE Name = '{tag} nothing'",
+          "records": [{ "n": 0, "total": null, "top": null }]
+        }
+      ]
+    },
+    {
+      "name": "MIN and MAX of dates are dates",
+      "steps": [
+        {
+          "query": "SELECT MIN(Start_Date__c) earliest, MAX(Start_Date__c) latest FROM Project__c WHERE Name LIKE '{tag}%'",
+          "records": [{ "earliest": "2024-02-10", "latest": "2026-01-15" }]
+        }
+      ]
+    },
+    {
+      "name": "MIN and MAX of text",
+      "steps": [
+        { "query": "SELECT MIN(Name) lo, MAX(Name) hi FROM Project__c WHERE Name LIKE '{tag}%'", "records": [{ "lo": "{tag} P1", "hi": "{tag} P4" }] }
+      ]
+    },
+    {
+      "name": "GROUP BY",
+      "steps": [
+        {
+          "query": "SELECT Status__c, COUNT(Id) n, SUM(Budget__c) total FROM Project__c WHERE Name LIKE '{tag}%' GROUP BY Status__c ORDER BY Status__c",
+          "records": [
+            { "Status__c": "Active", "n": 2, "total": 900 },
+            { "Status__c": "Done", "n": 1, "total": null },
+            { "Status__c": "Planned", "n": 1, "total": 100 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "GROUP BY several fields",
+      "steps": [
+        {
+          "query": "SELECT Status__c, Account__c, COUNT(Id) n FROM Project__c WHERE Name LIKE '{tag}%' GROUP BY Status__c, Account__c ORDER BY Status__c, Account__c NULLS LAST",
+          "records": [
+            { "Status__c": "Active", "Account__c": "{acct}", "n": 1 },
+            { "Status__c": "Active", "Account__c": null, "n": 1 },
+            { "Status__c": "Done", "Account__c": null, "n": 1 },
+            { "Status__c": "Planned", "Account__c": "{acct}", "n": 1 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "GROUP BY without aggregates lists the distinct values",
+      "steps": [
+        {
+          "query": "SELECT Status__c FROM Project__c WHERE Name LIKE '{tag}%' GROUP BY Status__c ORDER BY Status__c",
+          "pluck": "Status__c",
+          "values": ["Active", "Done", "Planned"]
+        }
+      ]
+    },
+    {
+      "name": "HAVING",
+      "steps": [
+        { "query": "SELECT Status__c FROM Project__c WHERE Name LIKE '{tag}%' GROUP BY Status__c HAVING COUNT(Id) > 1", "pluck": "Status__c", "values": ["Active"] },
+        {
+          "query": "SELECT Status__c, SUM(Budget__c) s FROM Project__c WHERE Name LIKE '{tag}%' GROUP BY Status__c HAVING SUM(Budget__c) >= 100 AND Status__c != 'Active'",
+          "records": [{ "Status__c": "Planned", "s": 100 }]
+        }
+      ]
+    },
+    {
+      "name": "ORDER BY an aggregate",
+      "steps": [
+        {
+          "query": "SELECT Status__c, SUM(Headcount__c) h FROM Project__c WHERE Name LIKE '{tag}%' GROUP BY Status__c ORDER BY SUM(Headcount__c) DESC NULLS LAST",
+          "pluck": "Status__c",
+          "values": ["Active", "Planned", "Done"]
+        },
+        {
+          "query": "SELECT Status__c, COUNT(Id) FROM Project__c WHERE Name LIKE '{tag}%' GROUP BY Status__c ORDER BY COUNT(Id) DESC, Status__c LIMIT 2",
+          "records": [{ "Status__c": "Active", "expr0": 2 }, { "Status__c": "Done", "expr0": 1 }]
+        }
+      ]
+    },
+    {
+      "name": "grouping by a parent field uses the field's name as the key",
+      "steps": [
+        {
+          "query": "SELECT Account__r.Name, SUM(Budget__c) FROM Project__c WHERE Account__c = '{acct}' GROUP BY Account__r.Name",
+          "records": [{ "Name": "{tag} Grouping", "expr0": 400 }]
+        }
+      ]
+    },
+    {
+      "name": "date functions in GROUP BY",
+      "steps": [
+        {
+          "query": "SELECT CALENDAR_YEAR(Start_Date__c) y, COUNT(Id) n FROM Project__c WHERE Name LIKE '{tag}%' GROUP BY CALENDAR_YEAR(Start_Date__c) ORDER BY CALENDAR_YEAR(Start_Date__c)",
+          "records": [{ "y": 2024, "n": 2 }, { "y": 2025, "n": 1 }, { "y": 2026, "n": 1 }]
+        },
+        {
+          "query": "SELECT CALENDAR_MONTH(Start_Date__c) m, COUNT(Id) n FROM Project__c WHERE Name LIKE '{tag}%' AND CALENDAR_YEAR(Start_Date__c) = 2024 GROUP BY CALENDAR_MONTH(Start_Date__c) ORDER BY CALENDAR_MONTH(Start_Date__c)",
+          "records": [{ "m": 2, "n": 1 }, { "m": 11, "n": 1 }]
+        },
+        {
+          "query": "SELECT CALENDAR_QUARTER(Start_Date__c) q, COUNT(Id) n FROM Project__c WHERE Name LIKE '{tag}%' GROUP BY CALENDAR_QUARTER(Start_Date__c) ORDER BY CALENDAR_QUARTER(Start_Date__c)",
+          "records": [{ "q": 1, "n": 2 }, { "q": 2, "n": 1 }, { "q": 4, "n": 1 }]
+        }
+      ]
+    },
+    {
+      "name": "date functions in WHERE",
+      "steps": [
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND CALENDAR_YEAR(Start_Date__c) = 2025", "pluck": "Name", "values": ["{tag} P3"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND DAY_IN_MONTH(Start_Date__c) = 30", "pluck": "Name", "values": ["{tag} P2"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND DAY_ONLY(Kickoff__c) = 2026-01-15", "pluck": "Name", "values": ["{tag} P4"] }
+      ]
+    },
+    {
+      "name": "a field that isn't grouped or aggregated is MALFORMED_QUERY",
+      "steps": [{ "query": "SELECT Name, COUNT(Id) FROM Project__c", "error": "MALFORMED_QUERY" }]
+    },
+    {
+      "name": "aggregates of the wrong type are errors",
+      "steps": [{ "query": "SELECT SUM(Name) FROM Project__c", "error": ["MALFORMED_QUERY", "INVALID_FIELD"] }]
+    },
+    {
+      "name": "ROLLUP/adds a grand total row",
+      "steps": [
+        {
+          "query": "SELECT Status__c, GROUPING(Status__c) grp, COUNT(Id) n FROM Project__c WHERE Name LIKE '{tag}%' GROUP BY ROLLUP(Status__c)",
+          "unordered": true,
+          "records": [
+            { "Status__c": "Active", "grp": 0, "n": 2 },
+            { "Status__c": "Done", "grp": 0, "n": 1 },
+            { "Status__c": "Planned", "grp": 0, "n": 1 },
+            { "Status__c": null, "grp": 1, "n": 4 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ROLLUP/subtotals for each level of two fields",
+      "steps": [
+        {
+          "query": "SELECT Status__c, Account__c, GROUPING(Status__c) gs, GROUPING(Account__c) ga, COUNT(Id) n, SUM(Budget__c) total FROM Project__c WHERE Name LIKE '{tag}%' GROUP BY ROLLUP(Status__c, Account__c)",
+          "unordered": true,
+          "records": [
+            { "Status__c": "Active", "Account__c": "{acct}", "gs": 0, "ga": 0, "n": 1, "total": 300 },
+            { "Status__c": "Active", "Account__c": null, "gs": 0, "ga": 0, "n": 1, "total": 600 },
+            { "Status__c": "Active", "Account__c": null, "gs": 0, "ga": 1, "n": 2, "total": 900 },
+            { "Status__c": "Done", "Account__c": null, "gs": 0, "ga": 0, "n": 1, "total": null },
+            { "Status__c": "Done", "Account__c": null, "gs": 0, "ga": 1, "n": 1, "total": null },
+            { "Status__c": "Planned", "Account__c": "{acct}", "gs": 0, "ga": 0, "n": 1, "total": 100 },
+            { "Status__c": "Planned", "Account__c": null, "gs": 0, "ga": 1, "n": 1, "total": 100 },
+            { "Status__c": null, "Account__c": null, "gs": 1, "ga": 1, "n": 4, "total": 1000 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CUBE/subtotals for every combination",
+      "steps": [
+        {
+          "query": "SELECT Status__c, Account__c, GROUPING(Status__c) gs, GROUPING(Account__c) ga, COUNT(Id) n FROM Project__c WHERE Name LIKE '{tag}%' GROUP BY CUBE(Status__c, Account__c)",
+          "total": 10,
+          "records": {
+            "$contains": [
+              { "Status__c": null, "Account__c": "{acct}", "gs": 1, "ga": 0, "n": 2 },
+              { "Status__c": null, "Account__c": null, "gs": 1, "ga": 0, "n": 2 },
+              { "Status__c": null, "Account__c": null, "gs": 1, "ga": 1, "n": 4 }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "GROUPING/needs a grouped field",
+      "steps": [{ "query": "SELECT GROUPING(Name), COUNT(Id) FROM Project__c GROUP BY ROLLUP(Status__c)", "error": ["MALFORMED_QUERY", "INVALID_FIELD"] }]
+    },
+    {
+      "name": "errors/formula, roll-up, fractional number and datetime fields can't be grouped",
+      "steps": [
+        { "query": "SELECT Is_Big__c, COUNT(Id) FROM Project__c GROUP BY Is_Big__c", "error": ["INVALID_FIELD", "MALFORMED_QUERY"] },
+        { "query": "SELECT Total_Hours__c, COUNT(Id) FROM Project__c GROUP BY Total_Hours__c", "error": ["INVALID_FIELD", "MALFORMED_QUERY"] },
+        { "query": "SELECT Budget__c, COUNT(Id) FROM Project__c GROUP BY Budget__c", "error": ["INVALID_FIELD", "MALFORMED_QUERY"] },
+        { "query": "SELECT Kickoff__c, COUNT(Id) FROM Project__c GROUP BY Kickoff__c", "error": ["INVALID_FIELD", "MALFORMED_QUERY"] },
+        { "query": "SELECT COUNT(Id) FROM Project__c GROUP BY CALENDAR_YEAR(Kickoff__c)", "total": { "$gt": -1 } }
+      ]
+    }
+  ]
+}

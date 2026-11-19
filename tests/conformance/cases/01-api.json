@@ -1,0 +1,140 @@
+{
+  "about": "API discovery and protocol behaviour: versions, resources, limits, sessions and the shape of errors.",
+  "cases": [
+    {
+      "name": "versions/list includes this version",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/services/data",
+          "status": 200,
+          "response": { "$contains": [{ "version": "{version}", "url": "/services/data/v{version}", "label": "$notnull" }] }
+        }
+      ]
+    },
+    {
+      "name": "versions/the version root lists resources",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/services/data/v{version}/",
+          "status": 200,
+          "response": {
+            "sobjects": "/services/data/v{version}/sobjects",
+            "query": "/services/data/v{version}/query",
+            "queryAll": "/services/data/v{version}/queryAll",
+            "composite": "/services/data/v{version}/composite",
+            "limits": "/services/data/v{version}/limits"
+          }
+        },
+        { "request": "GET", "path": "/services/data/v{version}", "status": 200, "response": { "sobjects": "/services/data/v{version}/sobjects" } }
+      ]
+    },
+    {
+      "name": "versions/an unsupported version is NOT_FOUND",
+      "steps": [{ "request": "GET", "path": "/services/data/v9999.0/sobjects", "status": 404, "error": "NOT_FOUND" }]
+    },
+    {
+      "name": "versions/older versions work and use their own URLs",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/services/data/v52.0/query?q=SELECT+Id+FROM+User+WHERE+Id+%3D+%27{user}%27",
+          "status": 200,
+          "response": { "totalSize": 1, "records": [{ "attributes": { "type": "User", "url": "/services/data/v52.0/sobjects/User/{user}" } }] }
+        }
+      ]
+    },
+    {
+      "name": "resources/an unknown resource is NOT_FOUND",
+      "steps": [{ "request": "GET", "path": "/no-such-resource", "status": 404, "error": "NOT_FOUND" }]
+    },
+    {
+      "name": "limits/reports the daily API allowance",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/limits",
+          "status": 200,
+          "response": { "DailyApiRequests": { "Max": { "$gt": 0 }, "Remaining": { "$gt": 0 } } }
+        }
+      ]
+    },
+    {
+      "name": "limits/responses carry Sforce-Limit-Info",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/sobjects",
+          "status": 200,
+          "response_headers": { "sforce-limit-info": "^api-usage=\\d+/\\d+$" }
+        }
+      ]
+    },
+    {
+      "name": "sessions/no token is INVALID_SESSION_ID",
+      "steps": [{ "request": "GET", "path": "/sobjects", "auth": false, "status": 401, "error": "INVALID_SESSION_ID" }]
+    },
+    {
+      "name": "sessions/a made-up token is INVALID_SESSION_ID",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/sobjects",
+          "headers": { "authorization": "Bearer 00Dxx0000000000!not-a-real-session" },
+          "status": 401,
+          "error": "INVALID_SESSION_ID"
+        }
+      ]
+    },
+    {
+      "name": "sessions/userinfo describes the session user",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/services/oauth2/userinfo",
+          "status": 200,
+          "response": {
+            "user_id": "{user}",
+            "organization_id": { "$regex": "^00D[a-zA-Z0-9]{15}$" },
+            "preferred_username": "$notnull",
+            "email": "$notnull"
+          }
+        }
+      ]
+    },
+    {
+      "name": "oauth/an unsupported grant type is an OAuth error",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/services/oauth2/token",
+          "auth": false,
+          "headers": { "content-type": "application/x-www-form-urlencoded" },
+          "raw_body": "grant_type=made_up",
+          "status": 400,
+          "response": { "error": "unsupported_grant_type" }
+        }
+      ]
+    },
+    {
+      "name": "errors/a malformed JSON body is JSON_PARSER_ERROR",
+      "steps": [{ "request": "POST", "path": "/sobjects/Account", "raw_body": "{not json", "status": 400, "error": "JSON_PARSER_ERROR" }]
+    },
+    {
+      "name": "errors/an unsupported method is METHOD_NOT_ALLOWED",
+      "steps": [{ "request": "PUT", "path": "/sobjects/Account", "body": {}, "status": 405, "error": "METHOD_NOT_ALLOWED" }]
+    },
+    {
+      "name": "errors/are a JSON array of message and errorCode",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/001000000000000AAA",
+          "status": 404,
+          "response": [{ "errorCode": "NOT_FOUND", "message": "$notnull" }]
+        }
+      ]
+    }
+  ]
+}

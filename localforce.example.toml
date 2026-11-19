@@ -1,0 +1,95 @@
+# localforce.toml: users, and custom objects and fields.
+#
+# Custom objects can also come from your SFDX project (`metadata` below, or
+# --metadata) and from the web UI at http://localhost:9600/. Definitions in
+# files take precedence over ones made in the UI.
+
+# SFDX projects or metadata folders to read objects and fields from,
+# relative to this file.
+# metadata = ["../my-salesforce-app/force-app"]
+
+# Users you can log in as. The first is the default for client_credentials
+# and for access tokens localforce didn't issue.
+[[users]]
+username = "admin@acme.dev"
+first_name = "Ada"
+last_name = "Admin"
+
+[[users]]
+username = "sales@acme.dev"
+first_name = "Sam"
+last_name = "Seller"
+
+# Custom fields on standard objects.
+[[fields]]
+object = "Account"
+name = "External_Id__c"
+type = "string"
+external_id = true
+unique = true
+
+[[fields]]
+object = "Account"
+name = "Tier__c"
+type = "picklist"
+values = ["Gold", "Silver", "Bronze"]
+restricted = true
+
+# Custom objects.
+[[objects]]
+name = "Invoice__c"
+label = "Invoice"
+
+[[objects.fields]]
+name = "Account__c"
+type = "reference"
+reference_to = "Account"
+child_relationship_name = "Invoices__r"
+master_detail = true
+
+[[objects.fields]]
+name = "Amount__c"
+type = "currency"
+
+[[objects.fields]]
+name = "Status__c"
+type = "picklist"
+values = ["Draft", "Sent", "Paid"]
+default = "Draft"
+
+# A default value can be a formula, worked out when a record is created
+# without the field. It can't read the record's own fields.
+[[objects.fields]]
+name = "Due__c"
+type = "date"
+default_formula = "TODAY() + 30"
+
+# A formula field: `type` is the result type. It's evaluated whenever the
+# record is read, so SOQL can filter and sort on it (but not group by it).
+[[objects.fields]]
+name = "Overdue__c"
+type = "boolean"
+formula = "NOT(ISPICKVAL(Status__c, \"Paid\")) && Due__c < TODAY()"
+
+[[objects.fields]]
+name = "Amount_With_Tax__c"
+type = "currency"
+formula = "Amount__c * 1.2"
+# blank_as_zero = false   # a blank Amount__c makes the result blank, not 0
+
+# A roll-up summary on the master: count, sum, min or max of the details.
+[[fields]]
+object = "Account"
+name = "Unpaid_Total__c"
+type = "currency"
+rollup = { op = "sum", object = "Invoice__c", via = "Account__c", field = "Amount__c", filters = [
+  { field = "Status__c", operation = "notEqual", value = "Paid" },
+] }
+
+# Validation rules: the save fails with `message` when `condition` is true.
+[[validation_rules]]
+object = "Invoice__c"
+name = "Amount_Positive"
+condition = "Amount__c <= 0"
+message = "An invoice's amount must be positive."
+field = "Amount__c"

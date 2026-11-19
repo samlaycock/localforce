@@ -1,0 +1,222 @@
+{
+  "about": "sObject Collections (/composite/sobjects): up to 200 records per call, allOrNone, mixed object types, and retrieving several records at once.",
+  "cases": [
+    {
+      "name": "create/every record, with a result for each in order",
+      "steps": [
+        {
+          "create_many": "Account",
+          "records": [{ "Name": "{tag} c1" }, { "Name": "{tag} c2" }, { "Name": "{tag} c3" }],
+          "results": ["ok", "ok", "ok"],
+          "as": ["a1", "a2", "a3"]
+        },
+        {
+          "retrieve_many": "Account",
+          "ids": ["{a1}", "{a2}", "{a3}"],
+          "fields": ["Name"],
+          "records": [{ "Name": "{tag} c1" }, { "Name": "{tag} c2" }, { "Name": "{tag} c3" }]
+        }
+      ]
+    },
+    {
+      "name": "create/without allOrNone, valid records are saved and invalid ones report errors",
+      "steps": [
+        {
+          "create_many": "Account",
+          "records": [{ "Name": "{tag} partial ok 1" }, { "Phone": "no name" }, { "Name": "{tag} partial ok 2" }],
+          "results": ["ok", { "error": "REQUIRED_FIELD_MISSING", "fields": ["Name"] }, "ok"]
+        },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag} partial ok%' ORDER BY Name", "pluck": "Name", "values": ["{tag} partial ok 1", "{tag} partial ok 2"] }
+      ]
+    },
+    {
+      "name": "create/with allOrNone, one invalid record rolls everything back",
+      "steps": [
+        {
+          "create_many": "Account",
+          "all_or_none": true,
+          "records": [{ "Name": "{tag} all or none 1" }, { "Name": "{tag} all or none 2", "Tier__c": "Nope" }],
+          "results": [{ "error": "ALL_OR_NONE_OPERATION_ROLLED_BACK" }, { "error": "INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST", "fields": ["Tier__c"] }]
+        },
+        { "query": "SELECT Id FROM Account WHERE Name LIKE '{tag} all or none%'", "records": [] }
+      ]
+    },
+    {
+      "name": "create/records of different types in one call",
+      "steps": [
+        {
+          "create_many": true,
+          "all_or_none": true,
+          "records": [
+            { "attributes": { "type": "Account" }, "Name": "{tag} mixed" },
+            { "attributes": { "type": "Contact" }, "LastName": "{tag} mixed" },
+            { "attributes": { "type": "Project__c" }, "Name": "{tag} mixed" }
+          ],
+          "results": ["ok", "ok", "ok"],
+          "as": ["a", "c", "p"]
+        },
+        { "query": "SELECT Id FROM Account WHERE Id = '{a}'", "records": [{ "Id": { "$regex": "^001" } }] },
+        { "query": "SELECT Id FROM Contact WHERE Id = '{c}'", "records": [{ "Id": { "$regex": "^003" } }] },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Name": "{tag} mixed" } }
+      ]
+    },
+    {
+      "name": "create/a record without a type fails on its own",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/composite/sobjects",
+          "body": { "records": [{ "Name": "{tag} typeless" }] },
+          "status": 200,
+          "response": [{ "success": false, "errors": [{ "statusCode": "$notnull" }] }]
+        }
+      ]
+    },
+    {
+      "name": "create/the 200-record limit",
+      "steps": [
+        { "create_many": "Account", "count": 200, "template": { "Name": "{tag} limit {i}" }, "all_or_none": true },
+        { "query": "SELECT COUNT() FROM Account WHERE Name LIKE '{tag} limit%'", "total": 200 },
+        { "query": "SELECT Id FROM Account WHERE Name LIKE '{tag} limit%' LIMIT 1", "save": { "one": "Id" } },
+        {
+          "request": "GET",
+          "path": "/composite/sobjects/Account?ids={one}&fields=Name",
+          "status": 200,
+          "response": [{ "Name": { "$regex": "^{tag} limit" } }]
+        }
+      ]
+    },
+    {
+      "name": "update/several records; failures are per record",
+      "steps": [
+        { "create_many": "Account", "records": [{ "Name": "{tag} u1" }, { "Name": "{tag} u2" }], "as": ["u1", "u2"] },
+        {
+          "update_many": "Account",
+          "records": [{ "Id": "{u1}", "Tier__c": "Gold" }, { "Id": "{u2}", "Tier__c": "Plutonium" }],
+          "results": ["ok", { "error": "INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST", "fields": ["Tier__c"] }]
+        },
+        { "retrieve_many": "Account", "ids": ["{u1}", "{u2}"], "fields": ["Tier__c"], "records": [{ "Tier__c": "Gold" }, { "Tier__c": null }] }
+      ]
+    },
+    {
+      "name": "update/with allOrNone, nothing is updated if one fails",
+      "steps": [
+        { "create_many": "Account", "records": [{ "Name": "{tag} u3" }, { "Name": "{tag} u4" }], "as": ["u3", "u4"] },
+        {
+          "update_many": "Account",
+          "all_or_none": true,
+          "records": [{ "Id": "{u3}", "Phone": "111" }, { "Id": "{u4}", "Name": null }],
+          "results": [{ "error": "ALL_OR_NONE_OPERATION_ROLLED_BACK" }, { "error": "REQUIRED_FIELD_MISSING", "fields": ["Name"] }]
+        },
+        { "retrieve": "Account", "id": "{u3}", "record": { "Phone": null } }
+      ]
+    },
+    {
+      "name": "update/records of different types in one call",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} mixed update" }, "as": "a" },
+        { "create": "Contact", "record": { "LastName": "{tag} mixed update" }, "as": "c" },
+        {
+          "update_many": true,
+          "records": [
+            { "attributes": { "type": "Account" }, "Id": "{a}", "Phone": "1" },
+            { "attributes": { "type": "Contact" }, "Id": "{c}", "Phone": "2" }
+          ],
+          "results": ["ok", "ok"]
+        },
+        { "retrieve": "Account", "id": "{a}", "record": { "Phone": "1" } },
+        { "retrieve": "Contact", "id": "{c}", "record": { "Phone": "2" } }
+      ]
+    },
+    {
+      "name": "update/a record without an Id fails on its own",
+      "steps": [
+        {
+          "request": "PATCH",
+          "path": "/composite/sobjects",
+          "body": { "records": [{ "attributes": { "type": "Account" }, "Name": "x" }] },
+          "status": 200,
+          "response": [{ "success": false }]
+        }
+      ]
+    },
+    {
+      "name": "delete/several records",
+      "steps": [
+        { "create_many": "Account", "records": [{ "Name": "{tag} del-1" }, { "Name": "{tag} del-2" }], "as": ["d1", "d2"] },
+        { "delete_many": true, "ids": ["{d1}", "{d2}"], "results": ["ok", "ok"] },
+        { "query": "SELECT Id FROM Account WHERE Name LIKE '{tag} del-%'", "records": [] }
+      ]
+    },
+    {
+      "name": "delete/records of different types in one call",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} mixed delete" }, "as": "a" },
+        { "create": "Project__c", "record": { "Name": "{tag} mixed delete" }, "as": "p" },
+        { "delete_many": true, "ids": ["{a}", "{p}"], "results": ["ok", "ok"] },
+        { "query": "SELECT Id FROM Project__c WHERE Id = '{p}'", "records": [] }
+      ]
+    },
+    {
+      "name": "delete/an already-deleted record fails on its own",
+      "steps": [
+        { "create_many": "Account", "records": [{ "Name": "{tag} dd1" }, { "Name": "{tag} dd2" }], "as": ["d1", "d2"] },
+        { "delete": "Account", "id": "{d1}" },
+        { "delete_many": true, "ids": ["{d1}", "{d2}"], "results": [{ "error": "ENTITY_IS_DELETED" }, "ok"] }
+      ]
+    },
+    {
+      "name": "delete/the response has the ids in order",
+      "steps": [
+        { "create_many": "Account", "records": [{ "Name": "{tag} order 1" }, { "Name": "{tag} order 2" }], "as": ["o1", "o2"] },
+        {
+          "request": "DELETE",
+          "path": "/composite/sobjects?ids={o2},{o1}",
+          "status": 200,
+          "response": [{ "id": "{o2}", "success": true, "errors": [] }, { "id": "{o1}", "success": true, "errors": [] }]
+        }
+      ]
+    },
+    {
+      "name": "retrieve/several records by id, in the order asked, with chosen fields",
+      "steps": [
+        { "create_many": "Account", "records": [{ "Name": "{tag} r1", "Tier__c": "Gold" }, { "Name": "{tag} r2", "Tier__c": "Silver" }], "as": ["r1", "r2"] },
+        {
+          "retrieve_many": "Account",
+          "ids": ["{r2}", "{r1}"],
+          "fields": ["Name", "Tier__c"],
+          "records": [
+            { "attributes": { "type": "Account" }, "Id": "{r2}", "Name": "{tag} r2", "Tier__c": "Silver" },
+            { "Id": "{r1}", "Name": "{tag} r1", "Tier__c": "Gold" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "retrieve/ids that don't exist come back as null",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} r5" }, "as": "r5" },
+        { "retrieve_many": "Account", "ids": ["{r5}", "001000000000000AAA"], "fields": ["Name"], "records": [{ "Name": "{tag} r5" }, null] }
+      ]
+    },
+    {
+      "name": "retrieve/GET with ?ids= and POST with a body",
+      "steps": [
+        { "create_many": "Account", "records": [{ "Name": "{tag} g1" }, { "Name": "{tag} g2" }], "as": ["g1", "g2"] },
+        {
+          "request": "GET",
+          "path": "/composite/sobjects/Account?ids={g1},{g2}&fields=Name",
+          "status": 200,
+          "response": [{ "Name": "{tag} g1" }, { "Name": "{tag} g2" }]
+        },
+        {
+          "request": "POST",
+          "path": "/composite/sobjects/Account",
+          "body": { "ids": ["{g2}", "{g1}"], "fields": ["Name"] },
+          "status": 200,
+          "response": [{ "Name": "{tag} g2" }, { "Name": "{tag} g1" }]
+        }
+      ]
+    }
+  ]
+}

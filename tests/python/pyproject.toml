@@ -1,0 +1,15 @@
+[project]
+name = "localforce-python-tests"
+version = "0.0.0"
+description = "Tests localforce through simple-salesforce, the Python Salesforce client"
+requires-python = ">=3.10"
+dependencies = [
+    "pytest>=8",
+    "simple-salesforce>=1.12,<2",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+addopts = "-ra"

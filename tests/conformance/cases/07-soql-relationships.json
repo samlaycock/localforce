@@ -1,0 +1,270 @@
+{
+  "about": "SOQL relationships: parent paths (child-to-parent), subqueries (parent-to-child), semi-joins and anti-joins, on standard and custom objects.",
+  "setup": [
+    { "create": "Account", "record": { "Name": "{tag} Parent Co", "Tier__c": "Gold" }, "as": "parent" },
+    { "create": "Account", "record": { "Name": "{tag} Child Co", "ParentId": "{parent}", "Tier__c": "Silver" }, "as": "child" },
+    {
+      "create_many": "Contact",
+      "records": [
+        { "FirstName": "Ann", "LastName": "{tag} Zed", "AccountId": "{child}", "Email": "ann@example.com" },
+        { "LastName": "{tag} Young", "AccountId": "{child}" },
+        { "LastName": "{tag} Xu" }
+      ],
+      "as": ["c1", "c2", "c3"]
+    },
+    {
+      "create_many": "Project__c",
+      "records": [
+        { "Name": "{tag} P1", "Account__c": "{parent}", "Budget__c": 100 },
+        { "Name": "{tag} P2", "Account__c": "{child}", "Budget__c": 300, "Status__c": "Active" },
+        { "Name": "{tag} P3" }
+      ],
+      "as": ["p1", "p2", "p3"]
+    },
+    {
+      "create_many": "Task_Item__c",
+      "records": [
+        { "Project__c": "{p2}", "Hours__c": 2 },
+        { "Project__c": "{p2}", "Hours__c": 5, "Done__c": true }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "parent/a parent field, with the parent's attributes",
+      "steps": [
+        {
+          "query": "SELECT LastName, Account.Name FROM Contact WHERE Id = '{c1}'",
+          "records": [
+            {
+              "LastName": "{tag} Zed",
+              "Account": { "attributes": { "type": "Account", "url": "/services/data/v{version}/sobjects/Account/{child}" }, "Name": "{tag} Child Co" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "parent/an empty lookup is a null parent",
+      "steps": [{ "query": "SELECT LastName, Account.Name FROM Contact WHERE Id = '{c3}'", "records": [{ "LastName": "{tag} Xu", "Account": null }] }]
+    },
+    {
+      "name": "parent/the lookup field and the parent's fields together",
+      "steps": [
+        {
+          "query": "SELECT AccountId, Account.Id, Account.Name, Account.Tier__c FROM Contact WHERE Id = '{c2}'",
+          "records": [{ "AccountId": "{child}", "Account": { "Id": "{child}", "Name": "{tag} Child Co", "Tier__c": "Silver" } }]
+        }
+      ]
+    },
+    {
+      "name": "parent/several levels up",
+      "steps": [
+        {
+          "query": "SELECT Account.Parent.Name, Account.Owner.Id FROM Contact WHERE Id = '{c1}'",
+          "records": [{ "Account": { "Parent": { "Name": "{tag} Parent Co" }, "Owner": { "Id": "{user}" } } }]
+        },
+        { "query": "SELECT Name, Parent.Name FROM Account WHERE Id = '{parent}'", "records": [{ "Name": "{tag} Parent Co", "Parent": null }] }
+      ]
+    },
+    {
+      "name": "parent/the owner and audit users",
+      "steps": [
+        {
+          "query": "SELECT Owner.Id, CreatedBy.Id, LastModifiedBy.Id FROM Account WHERE Id = '{parent}'",
+          "records": [{ "Owner": { "Id": "{user}" }, "CreatedBy": { "Id": "{user}" }, "LastModifiedBy": { "Id": "{user}" } }]
+        }
+      ]
+    },
+    {
+      "name": "parent/custom relationships use __r",
+      "steps": [
+        {
+          "query": "SELECT Name, Account__r.Name, Account__r.Tier__c FROM Project__c WHERE Name LIKE '{tag}%' ORDER BY Name",
+          "records": [
+            { "Name": "{tag} P1", "Account__r": { "Name": "{tag} Parent Co", "Tier__c": "Gold" } },
+            { "Name": "{tag} P2", "Account__r": { "Name": "{tag} Child Co", "Tier__c": "Silver" } },
+            { "Name": "{tag} P3", "Account__r": null }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "parent/relationship names ignore case",
+      "steps": [
+        { "query": "SELECT account__R.name FROM Project__c WHERE Id = '{p1}'", "records": [{ "Account__r": { "Name": "{tag} Parent Co" } }] }
+      ]
+    },
+    {
+      "name": "parent/three levels through custom and standard relationships",
+      "steps": [
+        {
+          "query": "SELECT Project__r.Account__r.Parent.Name FROM Task_Item__c WHERE Project__c = '{p2}'",
+          "records": [
+            { "Project__r": { "Account__r": { "Parent": { "Name": "{tag} Parent Co" } } } },
+            { "Project__r": { "Account__r": { "Parent": { "Name": "{tag} Parent Co" } } } }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "parent/filtering by parent fields",
+      "steps": [
+        { "query": "SELECT LastName FROM Contact WHERE Account.Name = '{tag} Child Co' ORDER BY LastName", "pluck": "LastName", "values": ["{tag} Young", "{tag} Zed"] },
+        {
+          "query": "SELECT LastName FROM Contact WHERE LastName LIKE '{tag}%' AND Account.Parent.Tier__c = 'Gold'",
+          "pluck": "LastName",
+          "values": ["{tag} Young", "{tag} Zed"],
+          "unordered": true
+        },
+        { "query": "SELECT Name FROM Project__c WHERE Account__r.Tier__c = 'Gold' AND Name LIKE '{tag}%'", "pluck": "Name", "values": ["{tag} P1"] }
+      ]
+    },
+    {
+      "name": "parent/!= on a parent field matches records without a parent",
+      "steps": [
+        {
+          "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Account__r.Tier__c != 'Gold' ORDER BY Name",
+          "pluck": "Name",
+          "values": ["{tag} P2", "{tag} P3"]
+        }
+      ]
+    },
+    {
+      "name": "parent/ordering by parent fields",
+      "steps": [
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' ORDER BY Account__r.Name NULLS LAST", "pluck": "Name", "values": ["{tag} P2", "{tag} P1", "{tag} P3"] }
+      ]
+    },
+    {
+      "name": "parent/an empty lookup in a filter",
+      "steps": [{ "query": "SELECT LastName FROM Contact WHERE LastName LIKE '{tag}%' AND AccountId = null", "pluck": "LastName", "values": ["{tag} Xu"] }]
+    },
+    {
+      "name": "parent/an unknown relationship is INVALID_FIELD",
+      "steps": [
+        { "query": "SELECT Acount.Name FROM Contact", "error": { "code": "INVALID_FIELD", "message": "Didn't understand relationship 'Acount'" } },
+        { "query": "SELECT Account__c.Name FROM Project__c", "error": "INVALID_FIELD" },
+        { "query": "SELECT Account.Nope FROM Contact", "error": { "code": "INVALID_FIELD", "message": "No such column 'Nope'" } }
+      ]
+    },
+    {
+      "name": "children/child records nested under each parent",
+      "steps": [
+        {
+          "query": "SELECT Name, (SELECT LastName, Email FROM Contacts ORDER BY LastName) FROM Account WHERE Id = '{child}'",
+          "records": [
+            {
+              "Name": "{tag} Child Co",
+              "Contacts": {
+                "totalSize": 2,
+                "done": true,
+                "records": [
+                  { "attributes": { "type": "Contact" }, "LastName": "{tag} Young", "Email": null },
+                  { "LastName": "{tag} Zed", "Email": "ann@example.com" }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "children/a parent with no children has null, not an empty list",
+      "steps": [{ "query": "SELECT Name, (SELECT Id FROM Contacts) FROM Account WHERE Id = '{parent}'", "records": [{ "Name": "{tag} Parent Co", "Contacts": null }] }]
+    },
+    {
+      "name": "children/WHERE, ORDER BY and LIMIT apply within each parent",
+      "steps": [
+        { "query": "SELECT (SELECT LastName FROM Contacts WHERE Email != null) FROM Account WHERE Id = '{child}'", "records": [{ "Contacts": [{ "LastName": "{tag} Zed" }] }] },
+        {
+          "query": "SELECT (SELECT LastName FROM Contacts ORDER BY LastName DESC LIMIT 1) FROM Account WHERE Id = '{child}'",
+          "records": [{ "Contacts": [{ "LastName": "{tag} Zed" }] }]
+        },
+        { "query": "SELECT (SELECT LastName FROM Contacts WHERE Email = 'nobody@example.com') FROM Account WHERE Id = '{child}'", "records": [{ "Contacts": null }] }
+      ]
+    },
+    {
+      "name": "children/custom child relationships",
+      "steps": [
+        {
+          "query": "SELECT Name, (SELECT Hours__c, Done__c FROM Task_Items__r ORDER BY Hours__c DESC) FROM Project__c WHERE Id = '{p2}'",
+          "records": [{ "Name": "{tag} P2", "Task_Items__r": [{ "Hours__c": 5, "Done__c": true }, { "Hours__c": 2, "Done__c": false }] }]
+        }
+      ]
+    },
+    {
+      "name": "children/subqueries over several parents, and several subqueries at once",
+      "steps": [
+        {
+          "query": "SELECT Name, (SELECT LastName FROM Contacts ORDER BY LastName), (SELECT Name, Account__r.Name FROM Projects__r) FROM Account WHERE Name LIKE '{tag}%' ORDER BY Name",
+          "records": [
+            {
+              "Name": "{tag} Child Co",
+              "Contacts": [{ "LastName": "{tag} Young" }, { "LastName": "{tag} Zed" }],
+              "Projects__r": [{ "Name": "{tag} P2", "Account__r": { "Name": "{tag} Child Co" } }]
+            },
+            { "Name": "{tag} Parent Co", "Contacts": null, "Projects__r": [{ "Name": "{tag} P1", "Account__r": { "Name": "{tag} Parent Co" } }] }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "children/the standard self-relationship ChildAccounts",
+      "steps": [{ "query": "SELECT (SELECT Name FROM ChildAccounts) FROM Account WHERE Id = '{parent}'", "records": [{ "ChildAccounts": [{ "Name": "{tag} Child Co" }] }] }]
+    },
+    {
+      "name": "children/a subquery can use parent fields of the child",
+      "steps": [
+        {
+          "query": "SELECT (SELECT Hours__c, Project__r.Name FROM Task_Items__r WHERE Done__c = true) FROM Project__c WHERE Id = '{p2}'",
+          "records": [{ "Task_Items__r": [{ "Hours__c": 5, "Project__r": { "Name": "{tag} P2" } }] }]
+        }
+      ]
+    },
+    {
+      "name": "children/an unknown child relationship is INVALID_TYPE",
+      "steps": [{ "query": "SELECT (SELECT Id FROM Contact) FROM Account", "error": { "code": "INVALID_TYPE", "message": "Didn't understand relationship 'Contact'" } }]
+    },
+    {
+      "name": "semi-join/Id IN (SELECT …)",
+      "steps": [
+        {
+          "query": "SELECT Name FROM Account WHERE Id IN (SELECT AccountId FROM Contact WHERE LastName LIKE '{tag}%') AND Name LIKE '{tag}%'",
+          "pluck": "Name",
+          "values": ["{tag} Child Co"]
+        }
+      ]
+    },
+    {
+      "name": "semi-join/Id NOT IN (SELECT …)",
+      "steps": [
+        {
+          "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND Id NOT IN (SELECT AccountId FROM Contact WHERE LastName LIKE '{tag}%')",
+          "pluck": "Name",
+          "values": ["{tag} Parent Co"]
+        }
+      ]
+    },
+    {
+      "name": "semi-join/on custom objects and fields",
+      "steps": [
+        {
+          "query": "SELECT Name FROM Project__c WHERE Id IN (SELECT Project__c FROM Task_Item__c WHERE Done__c = true) AND Name LIKE '{tag}%'",
+          "pluck": "Name",
+          "values": ["{tag} P2"]
+        }
+      ]
+    },
+    {
+      "name": "semi-join/on a reference field rather than Id",
+      "steps": [
+        {
+          "query": "SELECT LastName FROM Contact WHERE AccountId IN (SELECT Account__c FROM Project__c WHERE Status__c = 'Active' AND Name LIKE '{tag}%') ORDER BY LastName",
+          "pluck": "LastName",
+          "values": ["{tag} Young", "{tag} Zed"]
+        }
+      ]
+    }
+  ]
+}

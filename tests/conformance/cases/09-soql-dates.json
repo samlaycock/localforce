@@ -1,0 +1,100 @@
+{
+  "about": "Dates and datetimes in SOQL: literal values in any offset, relative date literals (TODAY, LAST_N_DAYS:n…), and date literals against datetime fields.",
+  "setup": [
+    {
+      "create_many": "Project__c",
+      "records": [
+        { "Name": "{tag} P1", "Start_Date__c": "{date:0}", "Kickoff__c": "{now}" },
+        { "Name": "{tag} P2", "Start_Date__c": "{date:-10}", "Kickoff__c": "2021-06-15T12:00:00Z" },
+        { "Name": "{tag} P3", "Start_Date__c": "{date:-400}" },
+        { "Name": "{tag} P4", "Start_Date__c": "{date:40}" }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "values/datetimes are returned in Salesforce's format, in UTC",
+      "steps": [
+        { "query": "SELECT Kickoff__c, CreatedDate FROM Project__c WHERE Name = '{tag} P2'", "records": [{ "Kickoff__c": "2021-06-15T12:00:00.000+0000", "CreatedDate": "$recent" }] }
+      ]
+    },
+    {
+      "name": "values/dates compare with date values",
+      "steps": [
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = {date:-10}", "pluck": "Name", "values": ["{tag} P2"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c >= {date:-10} ORDER BY Name", "pluck": "Name", "values": ["{tag} P1", "{tag} P2", "{tag} P4"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c < {date:-10}", "pluck": "Name", "values": ["{tag} P3"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c IN ({date:0}, {date:40}) ORDER BY Name", "pluck": "Name", "values": ["{tag} P1", "{tag} P4"] }
+      ]
+    },
+    {
+      "name": "values/datetimes compare with datetime values, in any offset",
+      "steps": [
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Kickoff__c < 2022-01-01T00:00:00Z", "pluck": "Name", "values": ["{tag} P2"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Kickoff__c = 2021-06-15T14:00:00+02:00", "pluck": "Name", "values": ["{tag} P2"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Kickoff__c = 2021-06-15T08:00:00-04:00", "pluck": "Name", "values": ["{tag} P2"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Kickoff__c > 2022-01-01T00:00:00.000Z", "pluck": "Name", "values": ["{tag} P1"] }
+      ]
+    },
+    {
+      "name": "values/a date value against a datetime field is an error",
+      "steps": [{ "query": "SELECT Id FROM Project__c WHERE Kickoff__c > {date:0}", "error": "INVALID_QUERY_FILTER_OPERATOR" }]
+    },
+    {
+      "name": "values/a datetime value against a date field is an error",
+      "steps": [{ "query": "SELECT Id FROM Project__c WHERE Start_Date__c > 2022-01-01T00:00:00Z", "error": "INVALID_QUERY_FILTER_OPERATOR" }]
+    },
+    {
+      "name": "values/a malformed date is MALFORMED_QUERY",
+      "steps": [{ "query": "SELECT Id FROM Project__c WHERE Start_Date__c = 2022-13-01", "error": ["MALFORMED_QUERY", "INVALID_QUERY_FILTER_OPERATOR"] }]
+    },
+    {
+      "name": "literals/TODAY, YESTERDAY, TOMORROW",
+      "steps": [
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = TODAY", "pluck": "Name", "values": ["{tag} P1"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = YESTERDAY", "records": [] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = TOMORROW", "records": [] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c < TODAY ORDER BY Name", "pluck": "Name", "values": ["{tag} P2", "{tag} P3"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c > TODAY", "pluck": "Name", "values": ["{tag} P4"] }
+      ]
+    },
+    {
+      "name": "literals/LAST_N_DAYS, NEXT_N_DAYS and N_DAYS_AGO",
+      "steps": [
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = LAST_N_DAYS:30 ORDER BY Name", "pluck": "Name", "values": ["{tag} P1", "{tag} P2"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = LAST_N_DAYS:365 ORDER BY Name", "pluck": "Name", "values": ["{tag} P1", "{tag} P2"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = NEXT_N_DAYS:60", "pluck": "Name", "values": ["{tag} P4"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c < LAST_N_DAYS:30", "pluck": "Name", "values": ["{tag} P3"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = N_DAYS_AGO:10", "pluck": "Name", "values": ["{tag} P2"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c > NEXT_N_DAYS:30", "pluck": "Name", "values": ["{tag} P4"] }
+      ]
+    },
+    {
+      "name": "literals/calendar periods",
+      "steps": [
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = THIS_YEAR", "pluck": "Name", "contains": ["{tag} P1"], "excludes": ["{tag} P3"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = THIS_MONTH", "pluck": "Name", "contains": ["{tag} P1"], "excludes": ["{tag} P3", "{tag} P4"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = LAST_N_YEARS:2", "pluck": "Name", "contains": ["{tag} P3"], "excludes": ["{tag} P4"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = LAST_YEAR", "pluck": "Name", "excludes": ["{tag} P1", "{tag} P4"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = THIS_WEEK", "pluck": "Name", "contains": ["{tag} P1"], "excludes": ["{tag} P3", "{tag} P4"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Start_Date__c = THIS_QUARTER", "pluck": "Name", "contains": ["{tag} P1"], "excludes": ["{tag} P3"] }
+      ]
+    },
+    {
+      "name": "literals/against datetime fields",
+      "steps": [
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND CreatedDate = TODAY ORDER BY Name", "pluck": "Name", "values": ["{tag} P1", "{tag} P2", "{tag} P3", "{tag} P4"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND CreatedDate = LAST_N_DAYS:1 ORDER BY Name", "pluck": "Name", "values": ["{tag} P1", "{tag} P2", "{tag} P3", "{tag} P4"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND CreatedDate < LAST_N_DAYS:7", "records": [] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Kickoff__c = TODAY", "pluck": "Name", "values": ["{tag} P1"] }
+      ]
+    },
+    {
+      "name": "literals/an unknown date literal is MALFORMED_QUERY",
+      "steps": [
+        { "query": "SELECT Id FROM Project__c WHERE Start_Date__c = SOMEDAY", "error": "MALFORMED_QUERY" },
+        { "query": "SELECT Id FROM Project__c WHERE Start_Date__c = LAST_N_DAYS", "error": "MALFORMED_QUERY" }
+      ]
+    }
+  ]
+}

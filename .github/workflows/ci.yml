@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.99
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build
+
+      # End-to-end tests with each language's Salesforce SDK, against target/debug/localforce.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tests/node/package-lock.json
+      - name: Node.js (jsforce)
+        working-directory: tests/node
+        run: npm ci && npm test
+      - uses: astral-sh/setup-uv@v6
+      - name: Python (simple-salesforce)
+        working-directory: tests/python
+        run: uv run pytest -q
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/go/go.mod
+          cache-dependency-path: tests/go/go.sum
+      - name: Go (go-salesforce)
+        working-directory: tests/go
+        # -count=1: Go caches test results, but not by the server binary under test.
+        run: go test -count=1 ./...
+
+  upstream:
+    name: jsforce's own integration tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.99
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: actions/cache@v4
+        with:
+          path: tests/upstream/.cache
+          key: upstream-${{ hashFiles('tests/upstream/jsforce.mjs') }}
+      - run: node tests/upstream/jsforce.mjs
+
+  docker:
+    name: Docker build (no push)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=linux/amd64
+          cache-to: type=gha,mode=max,scope=linux/amd64

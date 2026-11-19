@@ -1,0 +1,254 @@
+{
+  "about": "Describe: the global list of objects and each object's fields and relationships, for standard objects and the fixture schema.",
+  "cases": [
+    {
+      "name": "global/lists standard and custom objects",
+      "steps": [
+        {
+          "describe_global": true,
+          "object": { "encoding": "UTF-8", "maxBatchSize": 200 },
+          "sobjects": {
+            "Account": { "keyPrefix": "001", "custom": false, "queryable": true, "createable": true, "label": "Account" },
+            "Contact": { "keyPrefix": "003", "custom": false },
+            "Opportunity": { "keyPrefix": "006" },
+            "Lead": { "keyPrefix": "00Q" },
+            "Case": { "keyPrefix": "500" },
+            "User": { "keyPrefix": "005" },
+            "Project__c": {
+              "custom": true,
+              "label": "Project",
+              "labelPlural": "Projects",
+              "keyPrefix": { "$regex": "^[a-zA-Z0-9]{3}$" },
+              "queryable": true,
+              "urls": {
+                "sobject": "/services/data/v{version}/sobjects/Project__c",
+                "describe": "/services/data/v{version}/sobjects/Project__c/describe"
+              }
+            },
+            "Task_Item__c": { "custom": true, "label": "Task Item" },
+            "Contract_Doc__c": { "custom": true }
+          }
+        }
+      ]
+    },
+    {
+      "name": "global/basic information about one object",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/sobjects/Project__c",
+          "status": 200,
+          "response": { "objectDescribe": { "name": "Project__c", "custom": true }, "recentItems": "$any" }
+        }
+      ]
+    },
+    {
+      "name": "global/an unknown object is NOT_FOUND",
+      "steps": [{ "describe": "No_Such_Object__c", "error": "NOT_FOUND" }]
+    },
+    {
+      "name": "standard/Account's system fields",
+      "steps": [
+        {
+          "describe": "Account",
+          "object": { "name": "Account", "keyPrefix": "001", "custom": false, "createable": true, "deletable": true, "queryable": true },
+          "fields": {
+            "Id": { "type": "id", "createable": false, "updateable": false, "nillable": false },
+            "IsDeleted": { "type": "boolean", "createable": false, "updateable": false },
+            "OwnerId": { "type": "reference", "referenceTo": ["User"], "relationshipName": "Owner" },
+            "CreatedDate": { "type": "datetime", "createable": false, "updateable": false, "nillable": false },
+            "CreatedById": { "type": "reference", "referenceTo": ["User"], "relationshipName": "CreatedBy", "createable": false },
+            "LastModifiedDate": { "type": "datetime", "createable": false, "updateable": false },
+            "LastModifiedById": { "type": "reference", "relationshipName": "LastModifiedBy" },
+            "SystemModstamp": { "type": "datetime", "createable": false, "updateable": false }
+          }
+        }
+      ]
+    },
+    {
+      "name": "standard/Account's standard fields",
+      "steps": [
+        {
+          "describe": "Account",
+          "fields": {
+            "Name": { "type": "string", "nillable": false, "createable": true, "updateable": true, "nameField": true, "length": 255 },
+            "ParentId": { "type": "reference", "referenceTo": ["Account"], "relationshipName": "Parent", "nillable": true },
+            "AnnualRevenue": { "type": "currency" },
+            "NumberOfEmployees": { "type": "int" },
+            "Phone": { "type": "phone" },
+            "Website": { "type": "url" },
+            "Industry": { "type": "picklist", "restrictedPicklist": false }
+          }
+        }
+      ]
+    },
+    {
+      "name": "standard/Account's child relationships",
+      "steps": [
+        {
+          "describe": "Account",
+          "child_relationships": {
+            "Contacts": { "childSObject": "Contact", "field": "AccountId" },
+            "Opportunities": { "childSObject": "Opportunity", "field": "AccountId" },
+            "ChildAccounts": { "childSObject": "Account", "field": "ParentId", "cascadeDelete": false },
+            "Projects__r": { "childSObject": "Project__c", "field": "Account__c", "cascadeDelete": false }
+          }
+        }
+      ]
+    },
+    {
+      "name": "standard/custom fields on Account",
+      "steps": [
+        {
+          "describe": "Account",
+          "fields": {
+            "External_Key__c": { "custom": true, "type": "string", "length": 40, "externalId": true, "unique": true, "idLookup": true },
+            "Tier__c": {
+              "type": "picklist",
+              "restrictedPicklist": true,
+              "picklistValues": [
+                { "value": "Gold", "active": true },
+                { "value": "Silver", "active": true },
+                { "value": "Bronze", "active": true }
+              ]
+            },
+            "Regions__c": {
+              "type": "multipicklist",
+              "restrictedPicklist": true,
+              "picklistValues": [{ "value": "EMEA" }, { "value": "AMER" }, { "value": "APAC" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "standard/Contact's compound Name is read-only",
+      "steps": [
+        {
+          "describe": "Contact",
+          "fields": {
+            "Name": { "createable": false, "updateable": false },
+            "FirstName": { "nillable": true, "createable": true },
+            "LastName": { "nillable": false, "createable": true },
+            "Email": { "type": "email" },
+            "Birthdate": { "type": "date" },
+            "AccountId": { "type": "reference", "referenceTo": ["Account"], "relationshipName": "Account" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "standard/Opportunity, Lead and Case",
+      "steps": [
+        {
+          "describe": "Opportunity",
+          "fields": {
+            "Name": { "nillable": false },
+            "StageName": { "type": "picklist", "nillable": false },
+            "CloseDate": { "type": "date", "nillable": false },
+            "Amount": { "type": "currency" },
+            "Probability": { "type": "percent" }
+          }
+        },
+        { "describe": "Lead", "fields": { "LastName": { "nillable": false }, "Company": { "nillable": false }, "Status": { "type": "picklist" } } },
+        { "describe": "Case", "fields": { "CaseNumber": { "autoNumber": true, "createable": false, "updateable": false }, "Subject": { "type": "string" } } }
+      ]
+    },
+    {
+      "name": "custom/Project__c's fields have the types from metadata",
+      "steps": [
+        {
+          "describe": "Project__c",
+          "object": { "name": "Project__c", "custom": true, "label": "Project", "labelPlural": "Projects" },
+          "fields": {
+            "Name": { "label": "Project Name", "type": "string", "nillable": false, "nameField": true, "length": 80 },
+            "Budget__c": { "type": "currency", "precision": 16, "scale": 2, "custom": true },
+            "Headcount__c": { "type": "double", "precision": 6, "scale": 0 },
+            "Start_Date__c": { "type": "date" },
+            "Kickoff__c": { "type": "datetime" },
+            "Notes__c": { "type": "textarea", "length": 32768 },
+            "Is_Active__c": { "type": "boolean", "nillable": false, "defaultValue": true },
+            "Status__c": {
+              "type": "picklist",
+              "restrictedPicklist": true,
+              "picklistValues": [
+                { "value": "Planned", "defaultValue": true },
+                { "value": "Active", "defaultValue": false },
+                { "value": "Done", "defaultValue": false }
+              ]
+            },
+            "Code__c": { "type": "string", "externalId": true, "unique": false }
+          }
+        }
+      ]
+    },
+    {
+      "name": "custom/a lookup field",
+      "steps": [
+        {
+          "describe": "Project__c",
+          "fields": {
+            "Account__c": {
+              "type": "reference",
+              "referenceTo": ["Account"],
+              "relationshipName": "Account__r",
+              "nillable": true,
+              "cascadeDelete": false,
+              "custom": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "custom/a formula field is calculated and read-only",
+      "steps": [
+        {
+          "describe": "Project__c",
+          "fields": {
+            "Budget_K__c": {
+              "type": "double",
+              "calculated": true,
+              "createable": false,
+              "updateable": false,
+              "calculatedFormula": { "$regex": "Budget__c\\s*/\\s*1000" }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "custom/a master-detail child",
+      "steps": [
+        {
+          "describe": "Task_Item__c",
+          "fields": {
+            "Project__c": {
+              "type": "reference",
+              "referenceTo": ["Project__c"],
+              "relationshipName": "Project__r",
+              "nillable": false,
+              "cascadeDelete": true,
+              "updateable": false
+            },
+            "Name": { "autoNumber": true, "createable": false, "updateable": false },
+            "OwnerId": "$absent"
+          }
+        },
+        {
+          "describe": "Project__c",
+          "child_relationships": { "Task_Items__r": { "childSObject": "Task_Item__c", "field": "Project__c", "cascadeDelete": true } }
+        }
+      ]
+    },
+    {
+      "name": "custom/a restricting lookup",
+      "steps": [
+        {
+          "describe": "Project__c",
+          "child_relationships": { "Contract_Docs__r": { "childSObject": "Contract_Doc__c", "restrictedDelete": true, "cascadeDelete": false } }
+        }
+      ]
+    }
+  ]
+}

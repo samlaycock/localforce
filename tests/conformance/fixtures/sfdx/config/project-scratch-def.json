@@ -1,0 +1,15 @@
+{
+  "orgName": "localforce integration tests",
+  "edition": "Developer",
+  "features": [
+    "MarketingUser"
+  ],
+  "settings": {
+    "lightningExperienceSettings": {
+      "enableS1DesktopEnabled": true
+    },
+    "orderSettings": {
+      "enableOrders": true
+    }
+  }
+}

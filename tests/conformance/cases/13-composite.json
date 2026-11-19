@@ -1,0 +1,342 @@
+{
+  "about": "/composite: several subrequests in one call, later ones referring to earlier results, with allOrNone transactions; /composite/tree, /composite/batch and /composite/graph.",
+  "cases": [
+    {
+      "name": "references/create, use the new id, read it back and query it",
+      "steps": [
+        {
+          "composite": {
+            "allOrNone": true,
+            "compositeRequest": [
+              { "method": "POST", "url": "/services/data/v{version}/sobjects/Account", "referenceId": "acct", "body": { "Name": "{tag} composite" } },
+              { "method": "POST", "url": "/services/data/v{version}/sobjects/Contact", "referenceId": "ct", "body": { "LastName": "{tag} composite", "AccountId": "@{acct.id}" } },
+              { "method": "GET", "url": "/services/data/v{version}/sobjects/Contact/@{ct.id}?fields=AccountId,LastName", "referenceId": "read" },
+              { "method": "GET", "url": "/services/data/v{version}/query?q=SELECT+Id,+Account.Name+FROM+Contact+WHERE+Id+%3D+%27@{ct.id}%27", "referenceId": "q" }
+            ]
+          },
+          "save": { "acct": "0.body.id" },
+          "responses": [
+            { "referenceId": "acct", "httpStatusCode": 201, "body": { "id": "$id", "success": true } },
+            { "referenceId": "ct", "httpStatusCode": 201, "body": { "id": "$id", "success": true } },
+            { "referenceId": "read", "httpStatusCode": 200, "body": { "AccountId": "{acct}", "LastName": "{tag} composite" } },
+            { "referenceId": "q", "httpStatusCode": 200, "body": { "totalSize": 1, "records": [{ "Account": { "Name": "{tag} composite" } }] } }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "references/into query results",
+      "steps": [
+        {
+          "composite": {
+            "compositeRequest": [
+              { "method": "POST", "url": "/services/data/v{version}/sobjects/Account", "referenceId": "a", "body": { "Name": "{tag} ref query" } },
+              { "method": "GET", "url": "/services/data/v{version}/query?q=SELECT+Id+FROM+Account+WHERE+Name+%3D+%27{tag}+ref+query%27", "referenceId": "found" },
+              { "method": "PATCH", "url": "/services/data/v{version}/sobjects/Account/@{found.records[0].Id}", "referenceId": "upd", "body": { "Phone": "555-0199" } }
+            ]
+          },
+          "save": { "a": "0.body.id" },
+          "responses": [{ "httpStatusCode": 201 }, { "httpStatusCode": 200 }, { "httpStatusCode": 204, "body": null }]
+        },
+        { "retrieve": "Account", "id": "{a}", "record": { "Phone": "555-0199" } }
+      ]
+    },
+    {
+      "name": "references/update and delete subrequests",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} to delete" }, "as": "a" },
+        {
+          "composite": {
+            "compositeRequest": [
+              { "method": "PATCH", "url": "/services/data/v{version}/sobjects/Account/{a}", "referenceId": "u", "body": { "Phone": "1" } },
+              { "method": "GET", "url": "/services/data/v{version}/sobjects/Account/{a}?fields=Phone", "referenceId": "r" },
+              { "method": "DELETE", "url": "/services/data/v{version}/sobjects/Account/{a}", "referenceId": "d" }
+            ]
+          },
+          "responses": [{ "httpStatusCode": 204 }, { "httpStatusCode": 200, "body": { "Phone": "1" } }, { "httpStatusCode": 204 }]
+        },
+        { "query": "SELECT Id FROM Account WHERE Id = '{a}'", "records": [] }
+      ]
+    },
+    {
+      "name": "references/describe, limits and upsert subrequests",
+      "steps": [
+        {
+          "composite": {
+            "compositeRequest": [
+              { "method": "GET", "url": "/services/data/v{version}/sobjects/Project__c/describe", "referenceId": "d" },
+              { "method": "PATCH", "url": "/services/data/v{version}/sobjects/Account/External_Key__c/{tag}-CMP", "referenceId": "up", "body": { "Name": "{tag} composite upsert" } }
+            ]
+          },
+          "responses": [
+            { "httpStatusCode": 200, "body": { "name": "Project__c" } },
+            { "httpStatusCode": 201, "body": { "id": "$id", "created": true } }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "allOrNone/a failure rolls back everything and halts the rest",
+      "steps": [
+        {
+          "composite": {
+            "allOrNone": true,
+            "compositeRequest": [
+              { "method": "POST", "url": "/services/data/v{version}/sobjects/Account", "referenceId": "ok", "body": { "Name": "{tag} rollback" } },
+              { "method": "POST", "url": "/services/data/v{version}/sobjects/Contact", "referenceId": "bad", "body": { "FirstName": "no last name", "AccountId": "@{ok.id}" } },
+              { "method": "POST", "url": "/services/data/v{version}/sobjects/Account", "referenceId": "after", "body": { "Name": "{tag} rollback after" } }
+            ]
+          },
+          "responses": [
+            { "referenceId": "ok", "httpStatusCode": 400, "body": [{ "errorCode": "PROCESSING_HALTED" }] },
+            { "referenceId": "bad", "httpStatusCode": 400, "body": [{ "errorCode": "REQUIRED_FIELD_MISSING" }] },
+            { "referenceId": "after", "httpStatusCode": 400, "body": [{ "errorCode": "PROCESSING_HALTED" }] }
+          ]
+        },
+        { "query": "SELECT Id FROM Account WHERE Name LIKE '{tag} rollback%'", "records": [] }
+      ]
+    },
+    {
+      "name": "allOrNone/without it, other subrequests still succeed",
+      "steps": [
+        {
+          "composite": {
+            "allOrNone": false,
+            "compositeRequest": [
+              { "method": "POST", "url": "/services/data/v{version}/sobjects/Account", "referenceId": "good", "body": { "Name": "{tag} partial" } },
+              { "method": "POST", "url": "/services/data/v{version}/sobjects/Account", "referenceId": "bad", "body": { "Tier__c": "Nope" } },
+              { "method": "POST", "url": "/services/data/v{version}/sobjects/Contact", "referenceId": "independent", "body": { "LastName": "{tag} partial" } }
+            ]
+          },
+          "responses": [{ "httpStatusCode": 201 }, { "httpStatusCode": 400 }, { "httpStatusCode": 201 }]
+        },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag} partial%'", "pluck": "Name", "values": ["{tag} partial"] }
+      ]
+    },
+    {
+      "name": "allOrNone/a reference to a failed subrequest fails",
+      "steps": [
+        {
+          "composite": {
+            "allOrNone": false,
+            "compositeRequest": [
+              { "method": "POST", "url": "/services/data/v{version}/sobjects/Account", "referenceId": "bad", "body": { "Phone": "no name" } },
+              { "method": "POST", "url": "/services/data/v{version}/sobjects/Contact", "referenceId": "dependent", "body": { "LastName": "{tag} dependent", "AccountId": "@{bad.id}" } }
+            ]
+          },
+          "responses": [{ "httpStatusCode": 400 }, { "httpStatusCode": 400 }]
+        },
+        { "query": "SELECT Id FROM Contact WHERE LastName = '{tag} dependent'", "records": [] }
+      ]
+    },
+    {
+      "name": "limits/more than 25 subrequests is refused",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/composite",
+          "body": {
+            "compositeRequest": [
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r01" }, { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r02" },
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r03" }, { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r04" },
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r05" }, { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r06" },
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r07" }, { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r08" },
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r09" }, { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r10" },
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r11" }, { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r12" },
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r13" }, { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r14" },
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r15" }, { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r16" },
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r17" }, { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r18" },
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r19" }, { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r20" },
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r21" }, { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r22" },
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r23" }, { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r24" },
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r25" }, { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "r26" }
+            ]
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "name": "limits/a duplicate referenceId is refused",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/composite",
+          "body": {
+            "compositeRequest": [
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "same" },
+              { "method": "GET", "url": "/services/data/v{version}/limits", "referenceId": "same" }
+            ]
+          },
+          "status": 400
+        }
+      ]
+    },
+    {
+      "name": "tree/creates records with their children",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/composite/tree/Account",
+          "body": {
+            "records": [
+              {
+                "attributes": { "type": "Account", "referenceId": "acct" },
+                "Name": "{tag} tree",
+                "Contacts": {
+                  "records": [
+                    { "attributes": { "type": "Contact", "referenceId": "c1" }, "LastName": "{tag} leaf" },
+                    { "attributes": { "type": "Contact", "referenceId": "c2" }, "LastName": "{tag} twig" }
+                  ]
+                }
+              },
+              { "attributes": { "type": "Account", "referenceId": "acct2" }, "Name": "{tag} tree 2" }
+            ]
+          },
+          "status": 201,
+          "response": {
+            "hasErrors": false,
+            "results": {
+              "$unordered": [
+                { "referenceId": "acct", "id": "$id" },
+                { "referenceId": "c1", "id": "$id" },
+                { "referenceId": "c2", "id": "$id" },
+                { "referenceId": "acct2", "id": "$id" }
+              ]
+            }
+          }
+        },
+        { "query": "SELECT Id, Name FROM Account WHERE Name LIKE '{tag} tree%' ORDER BY Name", "records": [{ "Id": "$id", "Name": "{tag} tree" }, { "Id": "$id", "Name": "{tag} tree 2" }], "save": { "a": "Id" } },
+        { "query": "SELECT Id FROM Account WHERE Name = '{tag} tree 2'", "save": { "a2": "Id" } },
+        {
+          "query": "SELECT Name, (SELECT LastName FROM Contacts ORDER BY LastName) FROM Account WHERE Name = '{tag} tree'",
+          "records": [{ "Name": "{tag} tree", "Contacts": [{ "LastName": "{tag} leaf" }, { "LastName": "{tag} twig" }] }]
+        },
+        { "delete_many": true, "ids": ["{a}", "{a2}"] }
+      ]
+    },
+    {
+      "name": "tree/one bad record fails them all",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/composite/tree/Account",
+          "body": {
+            "records": [
+              {
+                "attributes": { "type": "Account", "referenceId": "acct" },
+                "Name": "{tag} doomed",
+                "Contacts": { "records": [{ "attributes": { "type": "Contact", "referenceId": "nameless" }, "Email": "nobody@example.com" }] }
+              }
+            ]
+          },
+          "status": 400,
+          "response": {
+            "hasErrors": true,
+            "results": [{ "referenceId": "nameless", "errors": [{ "statusCode": "REQUIRED_FIELD_MISSING", "fields": ["LastName"] }] }]
+          }
+        },
+        { "query": "SELECT COUNT() FROM Account WHERE Name = '{tag} doomed'", "total": 0 }
+      ]
+    },
+    {
+      "name": "tree/records must be of the URL's type",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/composite/tree/Account",
+          "body": { "records": [{ "attributes": { "type": "Contact", "referenceId": "c" }, "LastName": "{tag} wrong" }] },
+          "status": 400,
+          "response": { "hasErrors": true }
+        }
+      ]
+    },
+    {
+      "name": "batch/independent subrequests, each with its own result",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} batched" }, "as": "a" },
+        {
+          "request": "POST",
+          "path": "/composite/batch",
+          "body": {
+            "batchRequests": [
+              { "method": "PATCH", "url": "v{version}/sobjects/Account/{a}", "richInput": { "Name": "{tag} batched again" } },
+              { "method": "GET", "url": "v{version}/sobjects/Account/{a}?fields=Name" },
+              { "method": "GET", "url": "v{version}/sobjects/Account/001000000000000AAA" },
+              { "method": "GET", "url": "v{version}/query?q=SELECT+Name+FROM+Account+WHERE+Id+%3D+%27{a}%27" }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "hasErrors": true,
+            "results": [
+              { "statusCode": 204, "result": null },
+              { "statusCode": 200, "result": { "Name": "{tag} batched again" } },
+              { "statusCode": 404, "result": [{ "errorCode": "NOT_FOUND" }] },
+              { "statusCode": 200, "result": { "totalSize": 1, "records": [{ "Name": "{tag} batched again" }] } }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "batch/haltOnError stops after the first failure",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/composite/batch",
+          "body": {
+            "haltOnError": true,
+            "batchRequests": [
+              { "method": "GET", "url": "v{version}/sobjects/Account/001000000000000AAA" },
+              { "method": "GET", "url": "v{version}/limits" }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "hasErrors": true,
+            "results": [{ "statusCode": 404 }, { "statusCode": 412, "result": [{ "errorCode": "BATCH_PROCESSING_HALTED" }] }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "graph/each graph succeeds or fails on its own",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/composite/graph",
+          "body": {
+            "graphs": [
+              {
+                "graphId": "good",
+                "compositeRequest": [
+                  { "method": "POST", "url": "/services/data/v{version}/sobjects/Account", "referenceId": "acct", "body": { "Name": "{tag} graph" } },
+                  { "method": "POST", "url": "/services/data/v{version}/sobjects/Contact", "referenceId": "ct", "body": { "LastName": "{tag} graph", "AccountId": "@{acct.id}" } }
+                ]
+              },
+              {
+                "graphId": "bad",
+                "compositeRequest": [
+                  { "method": "POST", "url": "/services/data/v{version}/sobjects/Account", "referenceId": "acct", "body": { "Name": "{tag} graph doomed" } },
+                  { "method": "POST", "url": "/services/data/v{version}/sobjects/Contact", "referenceId": "ct", "body": { "AccountId": "@{acct.id}" } }
+                ]
+              }
+            ]
+          },
+          "status": 200,
+          "response": {
+            "graphs": [
+              { "graphId": "good", "isSuccessful": true },
+              { "graphId": "bad", "isSuccessful": false }
+            ]
+          },
+          "save": { "a": "graphs.0.graphResponse.compositeResponse.0.body.id" }
+        },
+        { "query": "SELECT Name, (SELECT LastName FROM Contacts) FROM Account WHERE Id = '{a}'", "records": [{ "Name": "{tag} graph", "Contacts": [{ "LastName": "{tag} graph" }] }] },
+        { "query": "SELECT COUNT() FROM Account WHERE Name = '{tag} graph doomed'", "total": 0 },
+        { "delete": "Account", "id": "{a}" }
+      ]
+    }
+  ]
+}

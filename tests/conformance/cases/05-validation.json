@@ -1,0 +1,242 @@
+{
+  "about": "The rules applied to writes, and the errors (codes and fields) they produce.",
+  "cases": [
+    {
+      "name": "required/missing on create",
+      "steps": [
+        { "create": "Account", "record": { "Phone": "1" }, "error": { "code": "REQUIRED_FIELD_MISSING", "fields": ["Name"] } },
+        { "create": "Contact", "record": { "FirstName": "x" }, "error": { "code": "REQUIRED_FIELD_MISSING", "fields": ["LastName"] } },
+        { "create": "Lead", "record": { "LastName": "{tag} lead" }, "error": { "code": "REQUIRED_FIELD_MISSING", "fields": ["Company"] } }
+      ]
+    },
+    {
+      "name": "required/every missing field is named",
+      "steps": [
+        { "create": "Opportunity", "record": { "Name": "{tag} opp" }, "error": { "code": "REQUIRED_FIELD_MISSING", "fields": ["StageName", "CloseDate"] } }
+      ]
+    },
+    {
+      "name": "required/an empty string counts as missing",
+      "steps": [{ "create": "Account", "record": { "Name": "" }, "error": { "code": "REQUIRED_FIELD_MISSING", "fields": ["Name"] } }]
+    },
+    {
+      "name": "required/cleared on update",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} required" }, "as": "a" },
+        { "update": "Account", "id": "{a}", "record": { "Name": null }, "error": { "code": "REQUIRED_FIELD_MISSING", "fields": ["Name"] } },
+        { "retrieve": "Account", "id": "{a}", "record": { "Name": "{tag} required" } }
+      ]
+    },
+    {
+      "name": "required/a master-detail parent",
+      "steps": [{ "create": "Task_Item__c", "record": { "Hours__c": 1 }, "error": { "code": "REQUIRED_FIELD_MISSING", "fields": ["Project__c"] } }]
+    },
+    {
+      "name": "access/unknown fields are INVALID_FIELD",
+      "steps": [{ "create": "Account", "record": { "Name": "{tag} x", "Nope__c": 1 }, "error": { "code": "INVALID_FIELD", "message": "Nope__c" } }]
+    },
+    {
+      "name": "access/unknown fields on update are INVALID_FIELD",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} unknown on update" }, "as": "a" },
+        { "update": "Account", "id": "{a}", "record": { "Nope__c": 1 }, "error": { "code": "INVALID_FIELD", "message": "Nope__c" } }
+      ]
+    },
+    {
+      "name": "access/field names ignore case",
+      "steps": [
+        { "create": "Account", "record": { "name": "{tag} lower case", "TIER__C": "Gold" }, "as": "a" },
+        { "retrieve": "Account", "id": "{a}", "record": { "Name": "{tag} lower case", "Tier__c": "Gold" } }
+      ]
+    },
+    {
+      "name": "access/audit fields can't be set",
+      "steps": [
+        {
+          "create": "Account",
+          "record": { "Name": "{tag} audit", "CreatedDate": "2020-01-01T00:00:00Z" },
+          "error": { "code": "INVALID_FIELD_FOR_INSERT_UPDATE", "fields": ["CreatedDate"] }
+        }
+      ]
+    },
+    {
+      "name": "access/the compound Name of a Contact can't be set",
+      "steps": [
+        {
+          "create": "Contact",
+          "record": { "LastName": "{tag} compound", "Name": "Someone Else" },
+          "error": { "code": "INVALID_FIELD_FOR_INSERT_UPDATE", "fields": ["Name"] }
+        }
+      ]
+    },
+    {
+      "name": "access/auto-number and formula fields can't be set",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} read-only" }, "as": "p" },
+        { "create": "Task_Item__c", "record": { "Project__c": "{p}", "Name": "TI-9999" }, "error": { "code": "INVALID_FIELD_FOR_INSERT_UPDATE", "fields": ["Name"] } },
+        { "update": "Project__c", "id": "{p}", "record": { "Budget_K__c": 5 }, "error": { "code": "INVALID_FIELD_FOR_INSERT_UPDATE", "fields": ["Budget_K__c"] } }
+      ]
+    },
+    {
+      "name": "access/a non-reparentable master-detail field can't be changed",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} parent a" }, "as": "a" },
+        { "create": "Project__c", "record": { "Name": "{tag} parent b" }, "as": "b" },
+        { "create": "Task_Item__c", "record": { "Project__c": "{a}" }, "as": "t" },
+        { "update": "Task_Item__c", "id": "{t}", "record": { "Project__c": "{b}" }, "error": { "code": "INVALID_FIELD_FOR_INSERT_UPDATE", "fields": ["Project__c"] } },
+        { "retrieve": "Task_Item__c", "id": "{t}", "record": { "Project__c": "{a}" } }
+      ]
+    },
+    {
+      "name": "values/text longer than the field is STRING_TOO_LONG",
+      "steps": [
+        {
+          "create": "Account",
+          "record": { "Name": "{tag} long", "External_Key__c": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" },
+          "error": { "code": "STRING_TOO_LONG", "fields": ["External_Key__c"] }
+        }
+      ]
+    },
+    {
+      "name": "values/text of exactly the maximum length is fine",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} exact", "External_Key__c": "{tag}xxxxxxxxxxxxxxxxxxxxxxxxxx" }, "as": "a" },
+        { "retrieve": "Account", "id": "{a}", "record": { "External_Key__c": "{tag}xxxxxxxxxxxxxxxxxxxxxxxxxx" } }
+      ]
+    },
+    {
+      "name": "values/a name longer than 255 characters is STRING_TOO_LONG",
+      "steps": [
+        {
+          "create": "Account",
+          "record": {
+            "Name": "{tag} xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          "error": { "code": "STRING_TOO_LONG", "fields": ["Name"] }
+        }
+      ]
+    },
+    {
+      "name": "values/restricted picklists only accept their values",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} tier", "Tier__c": "Platinum" }, "error": { "code": "INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST", "fields": ["Tier__c"] } },
+        { "create": "Account", "record": { "Name": "{tag} regions", "Regions__c": "EMEA;MARS" }, "error": { "code": "INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST", "fields": ["Regions__c"] } },
+        { "create": "Project__c", "record": { "Name": "{tag} status", "Status__c": "Cancelled" }, "error": { "code": "INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST", "fields": ["Status__c"] } }
+      ]
+    },
+    {
+      "name": "values/unrestricted picklists accept new values",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} industry", "Industry": "Space Mining" }, "as": "a" },
+        { "retrieve": "Account", "id": "{a}", "record": { "Industry": "Space Mining" } }
+      ]
+    },
+    {
+      "name": "values/email fields check the format",
+      "steps": [
+        { "create": "Contact", "record": { "LastName": "{tag} e", "Email": "not-an-email" }, "error": { "code": "INVALID_EMAIL_ADDRESS", "fields": ["Email"] } },
+        { "create": "Contact", "record": { "LastName": "{tag} e2", "Email": "first.last+tag@example.co.uk" }, "as": "c" },
+        { "retrieve": "Contact", "id": "{c}", "record": { "Email": "first.last+tag@example.co.uk" } }
+      ]
+    },
+    {
+      "name": "values/numbers that aren't numbers are JSON_PARSER_ERROR",
+      "steps": [{ "create": "Project__c", "record": { "Name": "{tag} n", "Budget__c": "lots" }, "error": "JSON_PARSER_ERROR" }]
+    },
+    {
+      "name": "values/numeric strings are accepted for number fields",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} numeric string", "Budget__c": "12.5" }, "as": "p" },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Budget__c": 12.5 } }
+      ]
+    },
+    {
+      "name": "values/invalid dates are JSON_PARSER_ERROR",
+      "steps": [{ "create": "Project__c", "record": { "Name": "{tag} d", "Start_Date__c": "2026-13-45" }, "error": "JSON_PARSER_ERROR" }]
+    },
+    {
+      "name": "values/checkboxes need booleans",
+      "steps": [{ "create": "Project__c", "record": { "Name": "{tag} b", "Is_Active__c": "sometimes" }, "error": "JSON_PARSER_ERROR" }]
+    },
+    {
+      "name": "references/a malformed id is MALFORMED_ID",
+      "steps": [{ "create": "Contact", "record": { "LastName": "{tag} m", "AccountId": "xyz" }, "error": { "code": "MALFORMED_ID", "fields": ["AccountId"] } }]
+    },
+    {
+      "name": "references/an id of the wrong object is FIELD_INTEGRITY_EXCEPTION",
+      "steps": [
+        { "create": "Contact", "record": { "LastName": "{tag} other" }, "as": "c" },
+        { "create": "Contact", "record": { "LastName": "{tag} w", "AccountId": "{c}" }, "error": { "code": "FIELD_INTEGRITY_EXCEPTION", "fields": ["AccountId"] } }
+      ]
+    },
+    {
+      "name": "references/a deleted parent is ENTITY_IS_DELETED",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} deleted parent" }, "as": "a" },
+        { "delete": "Account", "id": "{a}" },
+        { "create": "Contact", "record": { "LastName": "{tag} orphan", "AccountId": "{a}" }, "error": "ENTITY_IS_DELETED" }
+      ]
+    },
+    {
+      "name": "references/a 15-character parent id is stored as 18",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} parent15" }, "as": "a" },
+        { "create": "Contact", "record": { "LastName": "{tag} child15", "AccountId": "{a:15}" }, "as": "c" },
+        { "retrieve": "Contact", "id": "{c}", "record": { "AccountId": "{a}" } }
+      ]
+    },
+    {
+      "name": "uniqueness/a duplicate unique value is DUPLICATE_VALUE and names the other record",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} u1", "External_Key__c": "{tag}-UNIQUE" }, "as": "first" },
+        { "create": "Account", "record": { "Name": "{tag} u2", "External_Key__c": "{tag}-UNIQUE" }, "error": { "code": "DUPLICATE_VALUE", "message": "{first}" } }
+      ]
+    },
+    {
+      "name": "uniqueness/ignores case for text",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} c1", "External_Key__c": "{tag}-CaseKey" } },
+        { "create": "Account", "record": { "Name": "{tag} c2", "External_Key__c": "{tag}-casekey" }, "error": "DUPLICATE_VALUE" }
+      ]
+    },
+    {
+      "name": "uniqueness/applies to updates",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} up1", "External_Key__c": "{tag}-TAKEN" } },
+        { "create": "Account", "record": { "Name": "{tag} up2" }, "as": "b" },
+        { "update": "Account", "id": "{b}", "record": { "External_Key__c": "{tag}-TAKEN" }, "error": "DUPLICATE_VALUE" }
+      ]
+    },
+    {
+      "name": "uniqueness/a deleted record's value can be reused",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} r1", "External_Key__c": "{tag}-REUSE" }, "as": "first" },
+        { "delete": "Account", "id": "{first}" },
+        { "create": "Account", "record": { "Name": "{tag} r2", "External_Key__c": "{tag}-REUSE" } }
+      ]
+    },
+    {
+      "name": "uniqueness/non-unique external ids allow duplicates",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} s1", "Code__c": "{tag}-SAME" } },
+        { "create": "Project__c", "record": { "Name": "{tag} s2", "Code__c": "{tag}-SAME" } },
+        { "query": "SELECT Id FROM Project__c WHERE Code__c = '{tag}-SAME'", "records": { "$length": 2 } }
+      ]
+    },
+    {
+      "name": "atomic/a failed write changes nothing",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} atomic", "Tier__c": "Nope" }, "error": "INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST" },
+        { "query": "SELECT Id FROM Account WHERE Name = '{tag} atomic'", "records": [] }
+      ]
+    },
+    {
+      "name": "atomic/a failed update changes no field",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} atomic update", "Phone": "1" }, "as": "a" },
+        { "update": "Account", "id": "{a}", "record": { "Phone": "2", "Tier__c": "Nope" }, "error": "INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST" },
+        { "retrieve": "Account", "id": "{a}", "record": { "Phone": "1", "Tier__c": null } }
+      ]
+    }
+  ]
+}

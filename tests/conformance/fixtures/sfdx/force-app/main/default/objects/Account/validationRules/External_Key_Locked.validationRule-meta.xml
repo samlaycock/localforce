@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>External_Key_Locked</fullName>
+    <active>true</active>
+    <errorConditionFormula>NOT(ISNEW()) &amp;&amp; ISCHANGED(External_Key__c) &amp;&amp; NOT(ISBLANK(PRIORVALUE(External_Key__c))) &amp;&amp; BEGINS(PRIORVALUE(External_Key__c), "LOCKED-")</errorConditionFormula>
+    <errorMessage>A locked external key can't be changed.</errorMessage>
+</ValidationRule>

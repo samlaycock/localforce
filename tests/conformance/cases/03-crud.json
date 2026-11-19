@@ -1,0 +1,322 @@
+{
+  "about": "Single records: create, retrieve, update and delete, and the fields the platform maintains (defaults, owner, audit fields, compound names, auto-numbers).",
+  "cases": [
+    {
+      "name": "create/returns an 18-character id with the object's key prefix",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} create" }, "as": "a" },
+        { "retrieve": "Account", "id": "{a}", "record": { "Id": { "$regex": "^001[a-zA-Z0-9]{15}$" } } },
+        { "describe": "Project__c", "save": { "prefix": "keyPrefix" } },
+        { "create": "Project__c", "record": { "Name": "{tag} prefix" }, "as": "p" },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Id": { "$regex": "^{prefix}[a-zA-Z0-9]{15}$" } } }
+      ]
+    },
+    {
+      "name": "create/fills in defaults, owner and audit fields",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} defaults" }, "as": "p" },
+        {
+          "retrieve": "Project__c",
+          "id": "{p}",
+          "save": { "created": "CreatedDate" },
+          "record": {
+            "Status__c": "Planned",
+            "Is_Active__c": true,
+            "Budget__c": null,
+            "Notes__c": null,
+            "OwnerId": "{user}",
+            "CreatedById": "{user}",
+            "LastModifiedById": "{user}",
+            "IsDeleted": false,
+            "CreatedDate": "$recent",
+            "LastModifiedDate": "{created}",
+            "SystemModstamp": "$recent"
+          }
+        }
+      ]
+    },
+    {
+      "name": "create/values given override defaults",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} overrides", "Status__c": "Active", "Is_Active__c": false }, "as": "p" },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Status__c": "Active", "Is_Active__c": false } }
+      ]
+    },
+    {
+      "name": "create/values round-trip with their types",
+      "steps": [
+        {
+          "create": "Project__c",
+          "record": {
+            "Name": "{tag} types",
+            "Budget__c": 1234.5,
+            "Headcount__c": 7,
+            "Start_Date__c": "2026-03-01",
+            "Kickoff__c": "2026-03-01T09:30:00.000Z",
+            "Notes__c": "line one\nline two — ünïcödé ✓ \"quoted\" 'single' <b>&amp;</b>"
+          },
+          "as": "p"
+        },
+        {
+          "retrieve": "Project__c",
+          "id": "{p}",
+          "record": {
+            "Budget__c": 1234.5,
+            "Headcount__c": 7,
+            "Start_Date__c": "2026-03-01",
+            "Kickoff__c": "2026-03-01T09:30:00.000+0000",
+            "Notes__c": "line one\nline two — ünïcödé ✓ \"quoted\" 'single' <b>&amp;</b>"
+          }
+        }
+      ]
+    },
+    {
+      "name": "create/standard field types round-trip",
+      "steps": [
+        {
+          "create": "Account",
+          "record": {
+            "Name": "{tag} standard types",
+            "AnnualRevenue": 2500000.75,
+            "NumberOfEmployees": 42,
+            "Website": "https://example.com/a?b=c",
+            "Phone": "+44 (0)20 7946 0000",
+            "Industry": "Technology",
+            "Regions__c": "EMEA;APAC"
+          },
+          "as": "a"
+        },
+        {
+          "retrieve": "Account",
+          "id": "{a}",
+          "record": {
+            "AnnualRevenue": 2500000.75,
+            "NumberOfEmployees": 42,
+            "Website": "https://example.com/a?b=c",
+            "Phone": "+44 (0)20 7946 0000",
+            "Industry": "Technology",
+            "Regions__c": "EMEA;APAC"
+          }
+        }
+      ]
+    },
+    {
+      "name": "create/datetimes in other offsets are stored in UTC",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} tz", "Kickoff__c": "2026-03-01T09:30:00+02:00" }, "as": "p" },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Kickoff__c": "2026-03-01T07:30:00.000+0000" } }
+      ]
+    },
+    {
+      "name": "create/Contact.Name is FirstName + LastName",
+      "steps": [
+        { "create": "Contact", "record": { "FirstName": "Ada", "LastName": "{tag} Lovelace" }, "as": "c" },
+        { "retrieve": "Contact", "id": "{c}", "record": { "Name": "Ada {tag} Lovelace", "FirstName": "Ada" } },
+        { "create": "Contact", "record": { "LastName": "{tag} Solo" }, "as": "solo" },
+        { "retrieve": "Contact", "id": "{solo}", "record": { "Name": "{tag} Solo", "FirstName": null } }
+      ]
+    },
+    {
+      "name": "create/auto-numbers count up in their display format",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} auto" }, "as": "p" },
+        { "create": "Task_Item__c", "record": { "Project__c": "{p}" }, "as": "t1" },
+        { "create": "Task_Item__c", "record": { "Project__c": "{p}" }, "as": "t2" },
+        { "retrieve": "Task_Item__c", "id": "{t1}", "save": { "first": "Name" }, "record": { "Name": { "$regex": "^TI-\\d{4,}$" } } },
+        { "retrieve": "Task_Item__c", "id": "{t2}", "record": { "Name": { "$gt": "{first}" } } }
+      ]
+    },
+    {
+      "name": "create/an unknown object is NOT_FOUND",
+      "steps": [{ "create": "No_Such__c", "record": { "Name": "x" }, "error": "NOT_FOUND" }]
+    },
+    {
+      "name": "retrieve/returns attributes and every field",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} retrieve", "Tier__c": "Gold" }, "as": "a" },
+        {
+          "retrieve": "Account",
+          "id": "{a}",
+          "record": {
+            "attributes": { "type": "Account", "url": "/services/data/v{version}/sobjects/Account/{a}" },
+            "Id": "{a}",
+            "Name": "{tag} retrieve",
+            "Tier__c": "Gold",
+            "Regions__c": null,
+            "External_Key__c": null,
+            "OwnerId": "{user}",
+            "ParentId": null,
+            "Phone": null,
+            "IsDeleted": false,
+            "CreatedDate": "$datetime",
+            "CreatedById": "{user}",
+            "LastModifiedDate": "$datetime",
+            "LastModifiedById": "{user}",
+            "SystemModstamp": "$datetime"
+          }
+        }
+      ]
+    },
+    {
+      "name": "retrieve/?fields= limits the fields, and Id is always included",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} fields" }, "as": "a" },
+        {
+          "retrieve": "Account",
+          "id": "{a}",
+          "fields": ["Name", "Tier__c"],
+          "record": { "Id": "{a}", "Name": "{tag} fields", "Tier__c": null, "Industry": "$absent", "Phone": "$absent" }
+        }
+      ]
+    },
+    {
+      "name": "retrieve/15-character ids work and come back as 18",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} id15" }, "as": "a" },
+        { "retrieve": "Account", "id": "{a:15}", "record": { "Id": "{a}" } }
+      ]
+    },
+    {
+      "name": "retrieve/an id that doesn't exist is NOT_FOUND",
+      "steps": [{ "retrieve": "Account", "id": "001000000000000AAA", "error": "NOT_FOUND" }]
+    },
+    {
+      "name": "retrieve/another object's id is NOT_FOUND",
+      "steps": [
+        { "create": "Contact", "record": { "LastName": "{tag} wrong type" }, "as": "c" },
+        { "retrieve": "Account", "id": "{c}", "error": "NOT_FOUND" }
+      ]
+    },
+    {
+      "name": "retrieve/a malformed id is NOT_FOUND",
+      "steps": [{ "retrieve": "Account", "id": "not-an-id", "error": "NOT_FOUND" }]
+    },
+    {
+      "name": "retrieve/an unknown field in ?fields= is INVALID_FIELD",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} bad fields" }, "as": "a" },
+        { "retrieve": "Account", "id": "{a}", "fields": ["Name", "Nope__c"], "error": "INVALID_FIELD" }
+      ]
+    },
+    {
+      "name": "update/changes fields and LastModifiedDate, not CreatedDate",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} update", "Budget__c": 10 }, "as": "p" },
+        { "retrieve": "Project__c", "id": "{p}", "save": { "created": "CreatedDate", "modified": "LastModifiedDate", "stamp": "SystemModstamp" } },
+        { "sleep": 1100 },
+        { "update": "Project__c", "id": "{p}", "record": { "Budget__c": 20, "Status__c": "Active" } },
+        {
+          "retrieve": "Project__c",
+          "id": "{p}",
+          "record": {
+            "Budget__c": 20,
+            "Status__c": "Active",
+            "Name": "{tag} update",
+            "CreatedDate": "{created}",
+            "LastModifiedDate": { "$gt": "{modified}" },
+            "SystemModstamp": { "$gt": "{stamp}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "update/null clears a field",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} clear", "Budget__c": 10, "Notes__c": "x", "Start_Date__c": "2026-01-01" }, "as": "p" },
+        { "update": "Project__c", "id": "{p}", "record": { "Budget__c": null, "Notes__c": null, "Start_Date__c": null } },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Budget__c": null, "Notes__c": null, "Start_Date__c": null } }
+      ]
+    },
+    {
+      "name": "update/an empty string clears a text field",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} empty", "Phone": "555" }, "as": "a" },
+        { "update": "Account", "id": "{a}", "record": { "Phone": "" } },
+        { "retrieve": "Account", "id": "{a}", "record": { "Phone": null } }
+      ]
+    },
+    {
+      "name": "update/a 15-character id works",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} update id15" }, "as": "a" },
+        { "update": "Account", "id": "{a:15}", "record": { "Phone": "1" } },
+        { "retrieve": "Account", "id": "{a}", "record": { "Phone": "1" } }
+      ]
+    },
+    {
+      "name": "update/FirstName updates the compound Name",
+      "steps": [
+        { "create": "Contact", "record": { "FirstName": "Ada", "LastName": "{tag} Byron" }, "as": "c" },
+        { "update": "Contact", "id": "{c}", "record": { "FirstName": "Augusta" } },
+        { "retrieve": "Contact", "id": "{c}", "record": { "Name": "Augusta {tag} Byron" } }
+      ]
+    },
+    {
+      "name": "update/changing the owner",
+      "needs": ["user2"],
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} owner" }, "as": "a" },
+        { "update": "Account", "id": "{a}", "record": { "OwnerId": "{user2}" } },
+        { "query": "SELECT OwnerId, Owner.Id FROM Account WHERE Id = '{a}'", "records": [{ "OwnerId": "{user2}", "Owner": { "Id": "{user2}" } }] }
+      ]
+    },
+    {
+      "name": "update/a record that doesn't exist is NOT_FOUND",
+      "steps": [{ "update": "Account", "id": "001000000000000AAA", "record": { "Name": "x" }, "error": "NOT_FOUND" }]
+    },
+    {
+      "name": "delete/moves the record to the recycle bin",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} delete" }, "as": "a" },
+        { "delete": "Account", "id": "{a}" },
+        { "retrieve": "Account", "id": "{a}", "error": ["ENTITY_IS_DELETED", "NOT_FOUND"] },
+        { "query": "SELECT Id FROM Account WHERE Id = '{a}'", "records": [] },
+        { "query": "SELECT Id, IsDeleted FROM Account WHERE Id = '{a}'", "all": true, "records": [{ "Id": "{a}", "IsDeleted": true }] }
+      ]
+    },
+    {
+      "name": "delete/a 15-character id works",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} delete id15" }, "as": "a" },
+        { "delete": "Account", "id": "{a:15}" },
+        { "query": "SELECT Id FROM Account WHERE Id = '{a}'", "records": [] }
+      ]
+    },
+    {
+      "name": "delete/deleting twice is ENTITY_IS_DELETED",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} delete twice" }, "as": "a" },
+        { "delete": "Account", "id": "{a}" },
+        { "delete": "Account", "id": "{a}", "error": "ENTITY_IS_DELETED" }
+      ]
+    },
+    {
+      "name": "delete/updating a deleted record is ENTITY_IS_DELETED",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} update deleted" }, "as": "a" },
+        { "delete": "Account", "id": "{a}" },
+        { "update": "Account", "id": "{a}", "record": { "Name": "x" }, "error": "ENTITY_IS_DELETED" }
+      ]
+    },
+    {
+      "name": "delete/a record that never existed is an error",
+      "steps": [{ "delete": "Account", "id": "001000000000000AAA", "error": ["NOT_FOUND", "ENTITY_IS_DELETED", "INVALID_CROSS_REFERENCE_KEY"] }]
+    },
+    {
+      "name": "status codes/create is 201, update and delete are 204",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/sobjects/Account",
+          "body": { "Name": "{tag} status codes" },
+          "status": 201,
+          "save": { "a": "id" },
+          "response": { "id": "$id", "success": true, "errors": [] }
+        },
+        { "request": "PATCH", "path": "/sobjects/Account/{a}", "body": { "Phone": "1" }, "status": 204 },
+        { "request": "GET", "path": "/sobjects/Account/{a}?fields=Phone", "status": 200, "response": { "Phone": "1" } },
+        { "request": "DELETE", "path": "/sobjects/Account/{a}", "status": 204 }
+      ]
+    }
+  ]
+}

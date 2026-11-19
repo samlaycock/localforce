@@ -1,0 +1,126 @@
+{
+  "about": "What deleting a record does to the records that point at it: master-detail cascades, lookups are cleared, restricting lookups block the delete, and Account takes its Contacts and Opportunities with it.",
+  "cases": [
+    {
+      "name": "master-detail/deleting the master deletes its details",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} master" }, "as": "p" },
+        { "create_many": "Task_Item__c", "records": [{ "Project__c": "{p}" }, { "Project__c": "{p}" }], "as": ["t1", "t2"] },
+        { "delete": "Project__c", "id": "{p}" },
+        { "query": "SELECT Id FROM Task_Item__c WHERE Project__c = '{p}'", "records": [] },
+        {
+          "query": "SELECT Id, IsDeleted FROM Task_Item__c WHERE Id IN ('{t1}', '{t2}')",
+          "all": true,
+          "unordered": true,
+          "records": [{ "Id": "{t1}", "IsDeleted": true }, { "Id": "{t2}", "IsDeleted": true }]
+        },
+        { "retrieve": "Task_Item__c", "id": "{t1}", "error": ["ENTITY_IS_DELETED", "NOT_FOUND"] }
+      ]
+    },
+    {
+      "name": "master-detail/deleting a detail leaves the master alone",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} master stays" }, "as": "p" },
+        { "create_many": "Task_Item__c", "records": [{ "Project__c": "{p}" }, { "Project__c": "{p}" }], "as": ["t1", "t2"] },
+        { "delete": "Task_Item__c", "id": "{t1}" },
+        { "query": "SELECT Id FROM Task_Item__c WHERE Project__c = '{p}'", "records": [{ "Id": "{t2}" }] },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Name": "{tag} master stays" } }
+      ]
+    },
+    {
+      "name": "master-detail/a detail can't be added to a deleted master",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} gone master" }, "as": "p" },
+        { "delete": "Project__c", "id": "{p}" },
+        { "create": "Task_Item__c", "record": { "Project__c": "{p}" }, "error": "ENTITY_IS_DELETED" }
+      ]
+    },
+    {
+      "name": "lookups/a lookup to a deleted record is cleared",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} lookup parent" }, "as": "a" },
+        { "create": "Project__c", "record": { "Name": "{tag} lookup child", "Account__c": "{a}" }, "as": "p" },
+        { "delete": "Account", "id": "{a}" },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Account__c": null, "Name": "{tag} lookup child" } }
+      ]
+    },
+    {
+      "name": "lookups/deleting a parent account clears ParentId on its children",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} top" }, "as": "top" },
+        { "create": "Account", "record": { "Name": "{tag} sub", "ParentId": "{top}" }, "as": "sub" },
+        { "delete": "Account", "id": "{top}" },
+        { "retrieve": "Account", "id": "{sub}", "record": { "ParentId": null, "Name": "{tag} sub" } }
+      ]
+    },
+    {
+      "name": "lookups/a restricting lookup blocks deleting its parent",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} restricted" }, "as": "p" },
+        { "create": "Contract_Doc__c", "record": { "Name": "{tag} doc", "Project__c": "{p}" }, "as": "doc" },
+        { "delete": "Project__c", "id": "{p}", "error": "DELETE_FAILED" },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Id": "{p}", "IsDeleted": false } },
+        { "update": "Contract_Doc__c", "id": "{doc}", "record": { "Project__c": null } },
+        { "delete": "Project__c", "id": "{p}" }
+      ]
+    },
+    {
+      "name": "lookups/a deleted restricting record doesn't block",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} restricted, then free" }, "as": "p" },
+        { "create": "Contract_Doc__c", "record": { "Name": "{tag} doc 2", "Project__c": "{p}" }, "as": "doc" },
+        { "delete": "Contract_Doc__c", "id": "{doc}" },
+        { "delete": "Project__c", "id": "{p}" }
+      ]
+    },
+    {
+      "name": "standard/deleting an Account deletes its Contacts and Opportunities",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} cascading" }, "as": "a" },
+        { "create": "Contact", "record": { "LastName": "{tag} goes too", "AccountId": "{a}" }, "as": "c" },
+        { "create": "Opportunity", "record": { "Name": "{tag} goes too", "AccountId": "{a}", "StageName": "Prospecting", "CloseDate": "{date:30}" }, "as": "o" },
+        { "delete": "Account", "id": "{a}" },
+        { "query": "SELECT Id FROM Contact WHERE Id = '{c}'", "records": [] },
+        { "query": "SELECT Id FROM Opportunity WHERE Id = '{o}'", "records": [] },
+        { "query": "SELECT Id, IsDeleted FROM Contact WHERE Id = '{c}'", "all": true, "records": [{ "Id": "{c}", "IsDeleted": true }] }
+      ]
+    },
+    {
+      "name": "standard/deleting a Contact leaves its Account",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} keeps" }, "as": "a" },
+        { "create": "Contact", "record": { "LastName": "{tag} leaves", "AccountId": "{a}" }, "as": "c" },
+        { "delete": "Contact", "id": "{c}" },
+        { "retrieve": "Account", "id": "{a}", "record": { "Name": "{tag} keeps" } },
+        { "query": "SELECT (SELECT Id FROM Contacts) FROM Account WHERE Id = '{a}'", "records": [{ "Contacts": null }] }
+      ]
+    },
+    {
+      "name": "several/a blocked delete fails on its own when allOrNone is off",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} blocked" }, "as": "blocked" },
+        { "create": "Project__c", "record": { "Name": "{tag} free" }, "as": "free" },
+        { "create": "Contract_Doc__c", "record": { "Name": "{tag} blocker", "Project__c": "{blocked}" }, "as": "doc" },
+        { "delete_many": true, "ids": ["{blocked}", "{free}"], "results": [{ "error": "DELETE_FAILED" }, "ok"] },
+        { "query": "SELECT Name FROM Project__c WHERE Id IN ('{blocked}', '{free}')", "pluck": "Name", "values": ["{tag} blocked"] },
+        { "delete": "Contract_Doc__c", "id": "{doc}" }
+      ]
+    },
+    {
+      "name": "several/with allOrNone a blocked delete stops them all",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} blocked 2" }, "as": "blocked" },
+        { "create": "Project__c", "record": { "Name": "{tag} free 2" }, "as": "free" },
+        { "create": "Contract_Doc__c", "record": { "Name": "{tag} blocker 2", "Project__c": "{blocked}" }, "as": "doc" },
+        {
+          "delete_many": true,
+          "ids": ["{blocked}", "{free}"],
+          "all_or_none": true,
+          "results": [{ "error": "DELETE_FAILED" }, { "error": "ALL_OR_NONE_OPERATION_ROLLED_BACK" }]
+        },
+        { "query": "SELECT Name FROM Project__c WHERE Id IN ('{blocked}', '{free}') ORDER BY Name", "pluck": "Name", "values": ["{tag} blocked 2", "{tag} free 2"] },
+        { "delete": "Contract_Doc__c", "id": "{doc}" }
+      ]
+    }
+  ]
+}

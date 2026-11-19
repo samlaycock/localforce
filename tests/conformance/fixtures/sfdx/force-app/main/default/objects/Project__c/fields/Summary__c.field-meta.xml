@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Summary__c</fullName>
+    <formula>IF(ISBLANK(TEXT(Status__c)), "No status", TEXT(Status__c)) &amp; ": " &amp; UPPER(LEFT(Name, 20)) &amp; IF(ISBLANK(Code__c), "", " [" &amp; Code__c &amp; "]")</formula>
+    <label>Summary</label>
+    <type>Text</type>
+</CustomField>

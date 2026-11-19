@@ -1,0 +1,209 @@
+{
+  "about": "Standard fields a new org has (compound addresses, an opportunity's forecast category and fiscal period, a case's contact details), and the metadata clients read to build their UI: page layouts, compact layouts, list views, query plans, tabs, theme, limits and the version root.",
+  "setup": [
+    { "create": "Account", "record": { "Name": "{tag} metadata account", "BillingStreet": "1 Market St", "BillingCity": "San Francisco", "BillingState": "CA", "BillingPostalCode": "94105", "BillingCountry": "USA", "Rating": "Hot", "Ownership": "Private" }, "as": "acct" },
+    { "create": "Contact", "record": { "LastName": "{tag} Contact", "AccountId": "{acct}", "Email": "{tag}@example.com", "Phone": "555-0100", "MailingCity": "Oakland" }, "as": "contact" }
+  ],
+  "cases": [
+    {
+      "name": "fields/a compound address is read from its parts",
+      "steps": [
+        {
+          "retrieve": "Account",
+          "id": "{acct}",
+          "record": {
+            "BillingAddress": { "street": "1 Market St", "city": "San Francisco", "state": "CA", "postalCode": "94105", "country": "USA", "latitude": null, "longitude": null },
+            "ShippingAddress": null,
+            "Rating": "Hot",
+            "Ownership": "Private"
+          }
+        },
+        { "retrieve": "Contact", "id": "{contact}", "record": { "MailingAddress": { "city": "Oakland" }, "OtherAddress": null } },
+        {
+          "describe": "Account",
+          "fields": {
+            "BillingAddress": { "type": "address", "createable": false, "updateable": false },
+            "BillingState": { "type": "string", "length": 80, "createable": true },
+            "BillingLatitude": { "type": "double", "precision": 18, "scale": 15 },
+            "LastActivityDate": { "type": "date", "createable": false, "updateable": false }
+          }
+        },
+        { "describe": "Lead", "fields": { "Address": { "type": "address" }, "ConvertedAccountId": { "type": "reference", "createable": false } } }
+      ]
+    },
+    {
+      "name": "fields/an opportunity's forecast category and fiscal period follow its stage and close date",
+      "steps": [
+        { "create": "Opportunity", "record": { "Name": "{tag} fiscal", "AccountId": "{acct}", "StageName": "Negotiation/Review", "CloseDate": "2026-08-15" }, "as": "opp" },
+        { "retrieve": "Opportunity", "id": "{opp}", "record": { "ForecastCategory": "Pipeline", "ForecastCategoryName": "Pipeline", "FiscalYear": 2026, "FiscalQuarter": 3, "Fiscal": "2026 3", "IsPrivate": false } },
+        { "update": "Opportunity", "id": "{opp}", "record": { "StageName": "Closed Won", "CloseDate": "2026-11-02" } },
+        { "retrieve": "Opportunity", "id": "{opp}", "record": { "ForecastCategory": "Closed", "ForecastCategoryName": "Closed", "FiscalQuarter": 4, "LastStageChangeDate": "$recent" } }
+      ]
+    },
+    {
+      "name": "fields/a case copies its contact's details",
+      "steps": [
+        { "create": "Case", "record": { "Subject": "{tag} case", "ContactId": "{contact}" }, "as": "case" },
+        { "retrieve": "Case", "id": "{case}", "record": { "ContactEmail": "{tag}@example.com", "ContactPhone": "555-0100" } }
+      ]
+    },
+    {
+      "name": "layouts/an object's page layout, compact layout and approval layouts",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/describe/layouts",
+          "status": 200,
+          "response": {
+            "layouts": { "$contains": [{ "id": "$notnull", "buttonLayoutSection": "$notnull", "detailLayoutSections": "$notnull", "editLayoutSections": "$notnull", "relatedLists": "$notnull", "quickActionList": { "quickActionListItems": "$any" } }] },
+            "recordTypeMappings": { "$contains": [{ "master": true, "recordTypeId": "012000000000000AAA", "layoutId": "$notnull" }] },
+            "recordTypeSelectorRequired": [false]
+          }
+        },
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/describe/layouts/012000000000000AAA",
+          "status": 200,
+          "response": { "id": "$notnull", "detailLayoutSections": { "$contains": [{ "layoutRows": "$notnull", "columns": 2 }] } }
+        },
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/describe/compactLayouts",
+          "status": 200,
+          "response": { "compactLayouts": { "$contains": [{ "objectType": "Account", "fieldItems": "$notnull" }] }, "recordTypeCompactLayoutMappings": "$notnull" }
+        },
+        { "request": "GET", "path": "/sobjects/Account/describe/approvalLayouts", "status": 200, "response": { "approvalLayouts": "$any" } },
+        {
+          "request": "GET",
+          "path": "/sobjects/User/describe/namedLayouts/UserAlt",
+          "status": 200,
+          "response": { "layouts": { "$contains": [{ "detailLayoutSections": "$notnull" }] } }
+        }
+      ]
+    },
+    {
+      "name": "listviews/an object's standard list views, their describe and results",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/listviews",
+          "status": 200,
+          "response": {
+            "done": true,
+            "sobjectType": "Account",
+            "listviews": { "$contains": [{ "developerName": "AllAccounts", "label": "All Accounts", "id": "$notnull", "soqlCompatible": true }, { "developerName": "MyAccounts" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "listviews/a list view's describe and results",
+      "steps": [
+        { "request": "GET", "path": "/sobjects/Account/listviews", "status": 200, "save": { "view": "listviews.0.id" } },
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/listviews/{view}/describe",
+          "status": 200,
+          "response": {
+            "id": "{view}",
+            "sobjectType": "Account",
+            "query": { "$regex": "^SELECT .+ FROM Account" },
+            "columns": { "$contains": [{ "fieldNameOrPath": "Id", "hidden": true, "selectListItem": "Id" }] },
+            "orderBy": "$notnull"
+          }
+        },
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/listviews/{view}/results?limit=1",
+          "status": 200,
+          "response": { "id": "{view}", "done": "$any", "size": "$any", "columns": "$notnull", "records": "$any" }
+        },
+        {
+          "request": "GET",
+          "path": "/query?explain={view}",
+          "status": 200,
+          "response": { "plans": { "$contains": [{ "sobjectType": "Account" }] } }
+        }
+      ]
+    },
+    {
+      "name": "explain/a query's plans",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/query?explain=SELECT+Id+FROM+Account+WHERE+Name+%3D+%27{tag}%27",
+          "status": 200,
+          "response": { "plans": { "$contains": [{ "leadingOperationType": "TableScan", "sobjectType": "Account", "cardinality": "$any", "relativeCost": "$any", "sobjectCardinality": "$any", "notes": "$any", "fields": "$any" }] } }
+        },
+        { "request": "GET", "path": "/query?explain=SELECT+Nope+FROM+Account", "status": 400, "error": ["INVALID_FIELD", "MALFORMED_QUERY"] }
+      ]
+    },
+    {
+      "name": "ui/tabs and theme",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/tabs",
+          "status": 200,
+          "response": { "$contains": [{ "name": "standard-Account", "sobjectName": "Account", "label": "Accounts", "custom": false, "url": { "$regex": "/001/o$" }, "icons": "$notnull", "colors": "$notnull" }] }
+        },
+        {
+          "request": "GET",
+          "path": "/theme",
+          "status": 200,
+          "response": { "themeItems": { "$contains": [{ "name": "Account", "icons": "$notnull", "colors": "$notnull" }] } }
+        }
+      ]
+    },
+    {
+      "name": "api/the version root lists the identity URL",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/services/data/v{version}/",
+          "status": 200,
+          "response": { "identity": { "$regex": "^https?://.+/id/00D\\w{15}/{user}$" }, "tabs": "/services/data/v{version}/tabs", "theme": "/services/data/v{version}/theme", "limits": "/services/data/v{version}/limits" }
+        }
+      ]
+    },
+    {
+      "name": "limits/storage and the other org limits",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/limits",
+          "status": 200,
+          "response": {
+            "DataStorageMB": { "Max": { "$gt": 0 }, "Remaining": "$any" },
+            "FileStorageMB": { "Max": { "$gt": 0 }, "Remaining": "$any" },
+            "DailyBulkApiBatches": { "Max": { "$gt": 0 } },
+            "DailyAsyncApexExecutions": { "Max": { "$gt": 0 } },
+            "SingleEmail": { "Max": { "$gt": 0 } }
+          }
+        }
+      ]
+    },
+    {
+      "name": "collections/a rolled-back upsert still says which records it would have created",
+      "steps": [
+        {
+          "request": "PATCH",
+          "path": "/composite/sobjects/Account/External_Key__c",
+          "body": {
+            "allOrNone": true,
+            "records": [
+              { "attributes": { "type": "Account" }, "Name": "{tag} rollback 1", "External_Key__c": "{tag}-RB-1" },
+              { "attributes": { "type": "Account" }, "Name": "{tag} rollback 2", "External_Key__c": "{tag}-RB-2", "OwnerId": "INVALID_OWNER" }
+            ]
+          },
+          "status": 200,
+          "response": [
+            { "success": false, "created": true, "errors": [{ "statusCode": "ALL_OR_NONE_OPERATION_ROLLED_BACK" }] },
+            { "success": false, "created": true, "errors": [{ "statusCode": "MALFORMED_ID" }] }
+          ]
+        },
+        { "query": "SELECT Id FROM Account WHERE External_Key__c LIKE '{tag}-RB-%'", "records": [] }
+      ]
+    }
+  ]
+}

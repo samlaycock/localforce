@@ -1,0 +1,10 @@
+# Users for the integration suite. The first is the one tests log in as.
+[[users]]
+username = "admin@localforce.test"
+first_name = "Ada"
+last_name = "Admin"
+
+[[users]]
+username = "second@localforce.test"
+first_name = "Sam"
+last_name = "Second"

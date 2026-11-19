@@ -1,0 +1,110 @@
+{
+  "about": "Replication (sobjects/{type}/updated and /deleted), recently viewed records (/recent and FOR VIEW), and conditional requests (If-Modified-Since).",
+  "cases": [
+    {
+      "name": "replication/updated lists records changed in the window; deleted lists deletions",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} replicated" }, "as": "a" },
+        { "create": "Account", "record": { "Name": "{tag} survivor" }, "as": "b" },
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/updated/?start={date:-1}T00:00:00Z&end={date:1}T00:00:00Z",
+          "status": 200,
+          "response": { "ids": { "$contains": ["{a}", "{b}"] }, "latestDateCovered": "$datetime" }
+        },
+        { "delete": "Account", "id": "{a}" },
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/deleted/?start={date:-1}T00:00:00Z&end={date:1}T00:00:00Z",
+          "status": 200,
+          "response": {
+            "deletedRecords": { "$contains": [{ "id": "{a}", "deletedDate": "$datetime" }] },
+            "earliestDateAvailable": "$datetime",
+            "latestDateCovered": "$datetime"
+          }
+        },
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/deleted/?start={date:-1}T00:00:00Z&end={date:1}T00:00:00Z",
+          "status": 200,
+          "response": { "deletedRecords": { "$excludes": [{ "id": "{b}" }] } }
+        }
+      ]
+    },
+    {
+      "name": "replication/a window in the past has nothing new",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} too new" }, "as": "a" },
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/updated/?start={date:-2}T00:00:00Z&end={date:-1}T00:00:00Z",
+          "status": 200,
+          "response": { "ids": { "$excludes": ["{a}"] } }
+        }
+      ]
+    },
+    {
+      "name": "replication/the start must come before the end",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/updated/?start={date:1}T00:00:00Z&end={date:-1}T00:00:00Z",
+          "status": 400,
+          "response": [{ "errorCode": "INVALID_REPLICATION_DATE" }]
+        }
+      ]
+    },
+    {
+      "name": "recent/FOR VIEW marks records as recently viewed",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} viewed" }, "as": "a" },
+        { "query": "SELECT Id, Name FROM Account WHERE Id = '{a}' FOR VIEW", "records": [{ "Id": "{a}", "Name": "{tag} viewed" }] },
+        {
+          "request": "GET",
+          "path": "/recent/?limit=200",
+          "status": 200,
+          "response": { "$contains": [{ "attributes": { "type": "Account" }, "Id": "{a}", "Name": "{tag} viewed" }] }
+        },
+        {
+          "request": "GET",
+          "path": "/sobjects/Account",
+          "status": 200,
+          "response": { "recentItems": { "$contains": [{ "Id": "{a}" }] } }
+        }
+      ]
+    },
+    {
+      "name": "conditional/If-Modified-Since on a describe",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/describe",
+          "headers": { "If-Modified-Since": "Thu, 01 Jan 2099 00:00:00 GMT" },
+          "status": 304
+        },
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/describe",
+          "headers": { "If-Modified-Since": "Thu, 01 Jan 2004 00:00:00 GMT" },
+          "status": 200,
+          "response": { "name": "Account" }
+        },
+        { "request": "GET", "path": "/sobjects", "headers": { "If-Modified-Since": "Thu, 01 Jan 2099 00:00:00 GMT" }, "status": 304 }
+      ]
+    },
+    {
+      "name": "conditional/If-Modified-Since on a record",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} conditional" }, "as": "a" },
+        { "request": "GET", "path": "/sobjects/Account/{a}", "headers": { "If-Modified-Since": "Thu, 01 Jan 2099 00:00:00 GMT" }, "status": 304 },
+        {
+          "request": "GET",
+          "path": "/sobjects/Account/{a}",
+          "headers": { "If-Modified-Since": "Thu, 01 Jan 2004 00:00:00 GMT" },
+          "status": 200,
+          "response": { "Name": "{tag} conditional" }
+        }
+      ]
+    }
+  ]
+}

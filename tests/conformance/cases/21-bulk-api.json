@@ -1,0 +1,113 @@
+{
+  "about": "Bulk API 2.0 through plain HTTP: an ingest job from creation to results, and a query job. A real org runs jobs in the background, hence the settle steps. Each SDK's own bulk helpers are tested in its suite.",
+  "cases": [
+    {
+      "name": "ingest/create, upload, close, and read the results",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/jobs/ingest",
+          "body": { "object": "Account", "operation": "insert", "contentType": "CSV", "lineEnding": "LF" },
+          "status": 200,
+          "response": { "id": "$notnull", "state": "Open", "object": "Account", "operation": "insert", "contentType": "CSV" },
+          "save": { "job": "id" }
+        },
+        {
+          "request": "PUT",
+          "path": "/jobs/ingest/{job}/batches",
+          "headers": { "Content-Type": "text/csv" },
+          "raw_body": "Name,NumberOfEmployees\n{tag} bulk one,10\n{tag} bulk two,\n",
+          "status": 201
+        },
+        { "request": "PATCH", "path": "/jobs/ingest/{job}", "body": { "state": "UploadComplete" }, "status": 200, "response": { "id": "{job}" } },
+        { "settle": 15000 },
+        {
+          "request": "GET",
+          "path": "/jobs/ingest/{job}",
+          "status": 200,
+          "response": { "id": "{job}", "state": "JobComplete", "numberRecordsProcessed": 2, "numberRecordsFailed": 0 }
+        },
+        {
+          "request": "GET",
+          "path": "/jobs/ingest/{job}/successfulResults/",
+          "status": 200,
+          "response": { "$regex": "^\"sf__Id\",\"sf__Created\",\"?Name\"?,\"?NumberOfEmployees\"?\\r?\\n" }
+        },
+        {
+          "query": "SELECT Id, Name, NumberOfEmployees FROM Account WHERE Name LIKE '{tag} bulk%' ORDER BY Name",
+          "records": [{ "Id": "$id", "Name": "{tag} bulk one", "NumberOfEmployees": 10 }, { "Id": "$id", "Name": "{tag} bulk two", "NumberOfEmployees": null }],
+          "save": { "a": "Id" }
+        },
+        { "query": "SELECT Id FROM Account WHERE Name = '{tag} bulk two'", "save": { "b": "Id" } },
+        { "delete_many": true, "ids": ["{a}", "{b}"] },
+        { "request": "DELETE", "path": "/jobs/ingest/{job}", "status": 204 }
+      ]
+    },
+    {
+      "name": "ingest/failed rows are reported, and the others are saved",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/jobs/ingest",
+          "body": { "object": "Contact", "operation": "insert", "lineEnding": "LF" },
+          "status": 200,
+          "save": { "job": "id" }
+        },
+        {
+          "request": "PUT",
+          "path": "/jobs/ingest/{job}/batches",
+          "headers": { "Content-Type": "text/csv" },
+          "raw_body": "FirstName,LastName\nAda,{tag} bulk\nNo,\n",
+          "status": 201
+        },
+        { "request": "PATCH", "path": "/jobs/ingest/{job}", "body": { "state": "UploadComplete" }, "status": 200 },
+        { "settle": 15000 },
+        { "request": "GET", "path": "/jobs/ingest/{job}", "status": 200, "response": { "state": "JobComplete", "numberRecordsProcessed": 2, "numberRecordsFailed": 1 } },
+        {
+          "request": "GET",
+          "path": "/jobs/ingest/{job}/failedResults/",
+          "status": 200,
+          "response": { "$regex": "REQUIRED_FIELD_MISSING" }
+        },
+        { "query": "SELECT Id FROM Contact WHERE LastName = '{tag} bulk'", "total": 1, "save": { "c": "Id" } },
+        { "delete": "Contact", "id": "{c}" },
+        { "request": "DELETE", "path": "/jobs/ingest/{job}", "status": 204 }
+      ]
+    },
+    {
+      "name": "query/a query job's results as CSV",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/jobs/query",
+          "body": { "operation": "query", "query": "SELECT Id, Username FROM User WHERE Id = '{user}'" },
+          "status": 200,
+          "response": { "id": "$notnull", "operation": "query", "state": { "$regex": "^(UploadComplete|InProgress|JobComplete)$" } },
+          "save": { "job": "id" }
+        },
+        { "settle": 15000 },
+        { "request": "GET", "path": "/jobs/query/{job}", "status": 200, "response": { "id": "{job}", "state": "JobComplete" } },
+        {
+          "request": "GET",
+          "path": "/jobs/query/{job}/results",
+          "status": 200,
+          "response": { "$regex": "^\"Id\",\"Username\"\\r?\\n\"{user}\"," },
+          "response_headers": { "sforce-numberofrecords": "1", "sforce-locator": "null" }
+        },
+        { "request": "DELETE", "path": "/jobs/query/{job}", "status": 204 }
+      ]
+    },
+    {
+      "name": "errors/an unknown object",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/jobs/ingest",
+          "body": { "object": "NoSuchThing__c", "operation": "insert" },
+          "status": 400,
+          "response": [{ "errorCode": { "$regex": "^(INVALIDJOB|NOT_FOUND|INVALID_TYPE)$" } }]
+        }
+      ]
+    }
+  ]
+}

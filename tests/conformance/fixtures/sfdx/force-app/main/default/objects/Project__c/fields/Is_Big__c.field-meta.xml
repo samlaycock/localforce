@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Is_Big__c</fullName>
+    <formula>Budget__c &gt;= 100000 || Headcount__c &gt; 50</formula>
+    <label>Is Big</label>
+    <type>Checkbox</type>
+</CustomField>

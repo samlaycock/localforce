@@ -1,0 +1,86 @@
+{
+  "about": "The Tooling API (/tooling): queries over the org's metadata, its describes, and EntityDefinition and FieldDefinition through the data API.",
+  "cases": [
+    {
+      "name": "query/Apex classes",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/tooling/query/?q=SELECT+Id,+Name+FROM+ApexClass+LIMIT+5",
+          "status": 200,
+          "response": { "entityTypeName": "ApexClass", "done": true, "size": "$notnull", "totalSize": "$notnull", "records": "$notnull" }
+        }
+      ]
+    },
+    {
+      "name": "query/validation rules",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/tooling/query/?q=SELECT+ValidationName,+Active,+ErrorDisplayField,+ErrorMessage+FROM+ValidationRule+WHERE+ValidationName+%3D+%27Budget_Not_Negative%27",
+          "status": 200,
+          "response": {
+            "size": 1,
+            "records": [
+              {
+                "attributes": { "type": "ValidationRule", "url": { "$regex": "/tooling/sobjects/ValidationRule/" } },
+                "ValidationName": "Budget_Not_Negative",
+                "Active": true,
+                "ErrorDisplayField": "Budget__c",
+                "ErrorMessage": "Budget can't be negative."
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "query/custom objects and fields",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/tooling/query/?q=SELECT+Id,+DeveloperName+FROM+CustomObject+WHERE+DeveloperName+%3D+%27Project%27",
+          "status": 200,
+          "response": { "records": [{ "Id": "$id", "DeveloperName": "Project" }] },
+          "save": { "project": "records.0.Id" }
+        },
+        {
+          "request": "GET",
+          "path": "/tooling/query/?q=SELECT+DeveloperName,+TableEnumOrId+FROM+CustomField+WHERE+TableEnumOrId+%3D+%27{project}%27+AND+DeveloperName+%3D+%27Budget%27",
+          "status": 200,
+          "response": { "records": [{ "DeveloperName": "Budget", "TableEnumOrId": "{project}" }] }
+        }
+      ]
+    },
+    {
+      "name": "describe/tooling objects",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/tooling/sobjects/",
+          "status": 200,
+          "response": { "sobjects": { "$contains": [{ "name": "ApexClass" }, { "name": "ValidationRule" }] } }
+        },
+        {
+          "request": "GET",
+          "path": "/tooling/sobjects/ApexClass/describe",
+          "status": 200,
+          "response": { "name": "ApexClass", "fields": { "$contains": [{ "name": "Name" }, { "name": "Body" }] } }
+        }
+      ]
+    },
+    {
+      "name": "data API/EntityDefinition and FieldDefinition",
+      "steps": [
+        {
+          "query": "SELECT QualifiedApiName, KeyPrefix, Label FROM EntityDefinition WHERE QualifiedApiName = 'Account'",
+          "records": [{ "QualifiedApiName": "Account", "KeyPrefix": "001", "Label": "Account" }]
+        },
+        {
+          "query": "SELECT QualifiedApiName FROM FieldDefinition WHERE EntityDefinitionId = 'Account' AND QualifiedApiName = 'Name'",
+          "records": [{ "QualifiedApiName": "Name" }]
+        }
+      ]
+    }
+  ]
+}

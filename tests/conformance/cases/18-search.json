@@ -1,0 +1,202 @@
+{
+  "about": "SOSL through /search, and /parameterizedSearch: search terms, field scopes, RETURNING with fields, WHERE, ORDER BY and LIMIT, and errors. A real org indexes new records for search after a short delay, hence the settle step.",
+  "setup": [
+    { "create": "Account", "record": { "Name": "{tag} Searchable Industries", "Phone": "555-0199", "BillingCity": "Gotham" }, "as": "acct" },
+    { "create": "Account", "record": { "Name": "{tag} Other Holdings", "BillingCity": "Searchable Springs" }, "as": "other" },
+    { "create": "Contact", "record": { "FirstName": "Sally", "LastName": "{tag} Searcher", "Email": "sally.{tag}@example.com", "AccountId": "{acct}" }, "as": "contact" },
+    { "settle": 20000 }
+  ],
+  "cases": [
+    {
+      "name": "find/a term finds records of every type",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}%7D",
+          "status": 200,
+          "response": { "searchRecords": { "$unordered": [{ "Id": "{acct}" }, { "Id": "{other}" }, { "Id": "{contact}" }] } }
+        }
+      ]
+    },
+    {
+      "name": "find/RETURNING chooses the objects and fields",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}%7D+RETURNING+Account(Id,+Name+ORDER+BY+Name)",
+          "status": 200,
+          "response": {
+            "searchRecords": [
+              { "attributes": { "type": "Account" }, "Id": "{other}", "Name": "{tag} Other Holdings" },
+              { "attributes": { "type": "Account" }, "Id": "{acct}", "Name": "{tag} Searchable Industries" }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "find/all the words must match",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}+Searchable%7D+IN+NAME+FIELDS+RETURNING+Account(Name)",
+          "status": 200,
+          "response": { "searchRecords": [{ "Name": "{tag} Searchable Industries" }] }
+        }
+      ]
+    },
+    {
+      "name": "find/OR and wildcards",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}+AND+(Industr*+OR+Holdings)%7D+IN+NAME+FIELDS+RETURNING+Account(Name+ORDER+BY+Name)",
+          "status": 200,
+          "response": { "searchRecords": [{ "Name": "{tag} Other Holdings" }, { "Name": "{tag} Searchable Industries" }] }
+        }
+      ]
+    },
+    {
+      "name": "scope/IN NAME FIELDS doesn't look at other fields; IN ALL FIELDS does",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}+Springs%7D+IN+NAME+FIELDS+RETURNING+Account(Id)",
+          "status": 200,
+          "response": { "searchRecords": [] }
+        },
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}+Springs%7D+IN+ALL+FIELDS+RETURNING+Account(Id)",
+          "status": 200,
+          "response": { "searchRecords": [{ "Id": "{other}" }] }
+        }
+      ]
+    },
+    {
+      "name": "scope/IN EMAIL FIELDS",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7Bsally.{tag}*%7D+IN+EMAIL+FIELDS+RETURNING+Contact(Name,+Email)",
+          "status": 200,
+          "response": { "searchRecords": [{ "Name": "Sally {tag} Searcher", "Email": "sally.{tag}@example.com" }] }
+        }
+      ]
+    },
+    {
+      "name": "returning/WHERE and LIMIT inside RETURNING",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}%7D+RETURNING+Account(Name+WHERE+BillingCity+%3D+%27Gotham%27),+Contact(LastName+LIMIT+1)",
+          "status": 200,
+          "response": { "searchRecords": { "$unordered": [{ "Name": "{tag} Searchable Industries" }, { "LastName": "{tag} Searcher" }] } }
+        }
+      ]
+    },
+    {
+      "name": "returning/a global LIMIT",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}%7D+RETURNING+Account(Id)+LIMIT+1",
+          "status": 200,
+          "response": { "searchRecords": { "$length": 1 } }
+        }
+      ]
+    },
+    {
+      "name": "parameterized/GET",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/parameterizedSearch/?q={tag}+Searchable&sobject=Account&Account.fields=Id,Name&in=NAME",
+          "status": 200,
+          "response": { "searchRecords": [{ "Id": "{acct}", "Name": "{tag} Searchable Industries" }] }
+        }
+      ]
+    },
+    {
+      "name": "parameterized/POST",
+      "steps": [
+        {
+          "request": "POST",
+          "path": "/parameterizedSearch/",
+          "body": {
+            "q": "{tag}",
+            "fields": ["Id"],
+            "sobjects": [{ "name": "Contact", "fields": ["Id", "Email"] }, { "name": "Account", "where": "BillingCity = 'Gotham'" }]
+          },
+          "status": 200,
+          "response": { "searchRecords": { "$unordered": [{ "Id": "{contact}", "Email": "sally.{tag}@example.com" }, { "Id": "{acct}" }] } }
+        }
+      ]
+    },
+    {
+      "name": "errors/a term needs braces and two characters",
+      "steps": [
+        { "request": "GET", "path": "/search?q=FIND+{tag}", "status": 400, "response": [{ "errorCode": "MALFORMED_SEARCH" }] },
+        { "request": "GET", "path": "/search?q=FIND+%7Bx%7D", "status": 400, "response": [{ "errorCode": { "$regex": "^(INVALID_SEARCH|MALFORMED_SEARCH)$" } }] },
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}%7D+RETURNING+NoSuchThing__c",
+          "status": 400,
+          "response": [{ "errorCode": "INVALID_TYPE" }]
+        }
+      ]
+    },
+    {
+      "name": "find/a word matches whole words, unless a wildcard says otherwise",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}+Searchab%7D+IN+NAME+FIELDS+RETURNING+Account(Id)",
+          "status": 200,
+          "response": { "searchRecords": [] }
+        },
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}+earchable%7D+IN+NAME+FIELDS+RETURNING+Account(Id)",
+          "status": 200,
+          "response": { "searchRecords": [] }
+        },
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}+Searchab*%7D+IN+NAME+FIELDS+RETURNING+Account(Id)",
+          "status": 200,
+          "response": { "searchRecords": [{ "Id": "{acct}" }] }
+        },
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}+Searchabl%3F%7D+IN+NAME+FIELDS+RETURNING+Account(Id)",
+          "status": 200,
+          "response": { "searchRecords": [{ "Id": "{acct}" }] }
+        }
+      ]
+    },
+    {
+      "name": "find/a phone number or e-mail address is matched as a phrase of its words",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B555-0199%7D+IN+PHONE+FIELDS+RETURNING+Account(Id+WHERE+Name+LIKE+%27{tag}%25%27)",
+          "status": 200,
+          "response": { "searchRecords": [{ "Id": "{acct}" }] }
+        },
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7Bsally.{tag}%40example.com%7D+IN+EMAIL+FIELDS+RETURNING+Contact(Id)",
+          "status": 200,
+          "response": { "searchRecords": [{ "Id": "{contact}" }] }
+        },
+        {
+          "request": "GET",
+          "path": "/search?q=FIND+%7B{tag}.sally%40example.com%7D+IN+EMAIL+FIELDS+RETURNING+Contact(Id)",
+          "status": 200,
+          "response": { "searchRecords": [] }
+        }
+      ]
+    }
+  ]
+}

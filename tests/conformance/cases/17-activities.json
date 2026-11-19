@@ -1,0 +1,189 @@
+{
+  "about": "Tasks and events: their defaults and derived fields, and the polymorphic What and Who lookups: following them in SOQL, TYPEOF, child relationships, and which objects they accept.",
+  "setup": [
+    { "create": "Account", "record": { "Name": "{tag} Activity Account" }, "as": "acct" },
+    { "create": "Contact", "record": { "FirstName": "Ada", "LastName": "{tag} Who", "AccountId": "{acct}", "Email": "ada@example.com" }, "as": "contact" },
+    { "create": "Opportunity", "record": { "Name": "{tag} Activity Deal", "AccountId": "{acct}", "StageName": "Prospecting", "CloseDate": "{date:30}" }, "as": "opp" },
+    { "create": "Lead", "record": { "LastName": "{tag} Lead", "Company": "{tag} Lead Co" }, "as": "lead" }
+  ],
+  "cases": [
+    {
+      "name": "task/defaults, and the account it's about",
+      "steps": [
+        { "create": "Task", "record": { "Subject": "{tag} call", "WhatId": "{opp}", "WhoId": "{contact}" }, "as": "t" },
+        {
+          "retrieve": "Task",
+          "id": "{t}",
+          "record": { "Subject": "{tag} call", "Status": "Not Started", "Priority": "Normal", "IsClosed": false, "WhatId": "{opp}", "WhoId": "{contact}", "AccountId": "{acct}" }
+        },
+        { "update": "Task", "id": "{t}", "record": { "Status": "Completed" } },
+        { "retrieve": "Task", "id": "{t}", "record": { "IsClosed": true } }
+      ]
+    },
+    {
+      "name": "task/a contact's account when the task isn't about one",
+      "steps": [
+        { "create": "Task", "record": { "Subject": "{tag} follow up", "WhoId": "{contact}" }, "as": "t" },
+        { "retrieve": "Task", "id": "{t}", "record": { "WhatId": null, "AccountId": "{acct}" } }
+      ]
+    },
+    {
+      "name": "polymorphic/What and Who lead to a Name with the record's fields",
+      "steps": [
+        { "create": "Task", "record": { "Subject": "{tag} visit", "WhatId": "{acct}", "WhoId": "{contact}" }, "as": "t" },
+        {
+          "query": "SELECT Subject, What.Name, What.Type, Who.Name, Who.Email FROM Task WHERE Id = '{t}'",
+          "records": [
+            {
+              "Subject": "{tag} visit",
+              "What": { "Name": "{tag} Activity Account", "Type": "Account" },
+              "Who": { "Name": "Ada {tag} Who", "Email": "ada@example.com" }
+            }
+          ]
+        },
+        { "query": "SELECT COUNT() FROM Task WHERE What.Name = '{tag} Activity Account' AND Who.Type = 'Contact'", "total": 1 }
+      ]
+    },
+    {
+      "name": "polymorphic/an empty What is null",
+      "steps": [
+        { "create": "Task", "record": { "Subject": "{tag} alone" }, "as": "t" },
+        { "query": "SELECT Subject, What.Name FROM Task WHERE Id = '{t}'", "records": [{ "Subject": "{tag} alone", "What": null }] }
+      ]
+    },
+    {
+      "name": "polymorphic/filtering on the What's type",
+      "steps": [
+        {
+          "create_many": "Task",
+          "records": [
+            { "Subject": "{tag} on account", "WhatId": "{acct}" },
+            { "Subject": "{tag} on deal", "WhatId": "{opp}" },
+            { "Subject": "{tag} on lead", "WhoId": "{lead}" }
+          ]
+        },
+        { "query": "SELECT Subject FROM Task WHERE Subject LIKE '{tag}%' AND What.Type = 'Opportunity'", "records": [{ "Subject": "{tag} on deal" }] },
+        { "query": "SELECT Subject FROM Task WHERE Subject LIKE '{tag}%' AND Who.Type = 'Lead'", "records": [{ "Subject": "{tag} on lead" }] }
+      ]
+    },
+    {
+      "name": "TYPEOF/picks the fields for each type",
+      "steps": [
+        {
+          "create_many": "Task",
+          "records": [
+            { "Subject": "{tag} a", "WhatId": "{acct}", "WhoId": "{contact}" },
+            { "Subject": "{tag} b", "WhatId": "{opp}", "WhoId": "{contact}" },
+            { "Subject": "{tag} c", "WhoId": "{lead}" }
+          ]
+        },
+        {
+          "query": "SELECT Subject, TYPEOF What WHEN Account THEN Name WHEN Opportunity THEN Name, StageName END, TYPEOF Who WHEN Lead THEN Company ELSE Name END FROM Task WHERE Subject LIKE '{tag}%' ORDER BY Subject",
+          "records": [
+            { "Subject": "{tag} a", "What": { "Name": "{tag} Activity Account" }, "Who": { "Name": "Ada {tag} Who" } },
+            { "Subject": "{tag} b", "What": { "Name": "{tag} Activity Deal", "StageName": "Prospecting" }, "Who": { "Name": "Ada {tag} Who" } },
+            { "Subject": "{tag} c", "What": null, "Who": { "Company": "{tag} Lead Co" } }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "TYPEOF/only on a polymorphic relationship, and only its types",
+      "steps": [
+        { "query": "SELECT TYPEOF Account WHEN Account THEN Name END FROM Contact LIMIT 1", "error": ["INVALID_FIELD", "MALFORMED_QUERY"] },
+        { "query": "SELECT TYPEOF What WHEN Contact THEN Name END FROM Task LIMIT 1", "error": ["INVALID_FIELD", "MALFORMED_QUERY", "INVALID_TYPE"] }
+      ]
+    },
+    {
+      "name": "children/an account's and a contact's Tasks",
+      "steps": [
+        {
+          "create_many": "Task",
+          "records": [
+            { "Subject": "{tag} t1", "WhatId": "{acct}", "WhoId": "{contact}" },
+            { "Subject": "{tag} t2", "WhatId": "{acct}" }
+          ]
+        },
+        {
+          "query": "SELECT Name, (SELECT Subject FROM Tasks ORDER BY Subject) FROM Account WHERE Id = '{acct}'",
+          "records": [{ "Name": "{tag} Activity Account", "Tasks": [{ "Subject": "{tag} t1" }, { "Subject": "{tag} t2" }] }]
+        },
+        {
+          "query": "SELECT LastName, (SELECT Subject FROM Tasks) FROM Contact WHERE Id = '{contact}'",
+          "records": [{ "LastName": "{tag} Who", "Tasks": [{ "Subject": "{tag} t1" }] }]
+        }
+      ]
+    },
+    {
+      "name": "lookups/What can't be a contact, Who can't be an account",
+      "steps": [
+        { "create": "Task", "record": { "Subject": "{tag} x", "WhatId": "{contact}" }, "error": { "code": "FIELD_INTEGRITY_EXCEPTION", "fields": ["WhatId"] } },
+        { "create": "Task", "record": { "Subject": "{tag} y", "WhoId": "{acct}" }, "error": { "code": "FIELD_INTEGRITY_EXCEPTION", "fields": ["WhoId"] } }
+      ]
+    },
+    {
+      "name": "lookups/a task about a lead can't be related to a record too",
+      "steps": [
+        { "create": "Task", "record": { "Subject": "{tag} lead and account", "WhoId": "{lead}", "WhatId": "{acct}" }, "error": "FIELD_INTEGRITY_EXCEPTION" }
+      ]
+    },
+    {
+      "name": "lookups/What can be a custom object",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} activity project" }, "as": "p" },
+        { "create": "Task", "record": { "Subject": "{tag} project task", "WhatId": "{p}" }, "as": "t" },
+        { "query": "SELECT What.Name, What.Type FROM Task WHERE Id = '{t}'", "records": [{ "What": { "Name": "{tag} activity project", "Type": "Project__c" } }] }
+      ]
+    },
+    {
+      "name": "event/end time from the duration, and the activity date",
+      "steps": [
+        {
+          "create": "Event",
+          "record": { "Subject": "{tag} meeting", "StartDateTime": "2026-03-10T12:00:00Z", "DurationInMinutes": 45, "WhatId": "{acct}" },
+          "as": "e"
+        },
+        {
+          "retrieve": "Event",
+          "id": "{e}",
+          "record": {
+            "StartDateTime": "2026-03-10T12:00:00.000+0000",
+            "EndDateTime": "2026-03-10T12:45:00.000+0000",
+            "ActivityDateTime": "2026-03-10T12:00:00.000+0000",
+            "ActivityDate": "2026-03-10",
+            "DurationInMinutes": 45,
+            "AccountId": "{acct}"
+          }
+        },
+        { "query": "SELECT Name, (SELECT Subject FROM Events) FROM Account WHERE Id = '{acct}'", "records": [{ "Name": "{tag} Activity Account", "Events": [{ "Subject": "{tag} meeting" }] }] }
+      ]
+    },
+    {
+      "name": "event/duration from the end time",
+      "steps": [
+        { "create": "Event", "record": { "Subject": "{tag} workshop", "StartDateTime": "2026-03-10T09:00:00Z", "EndDateTime": "2026-03-10T11:30:00Z" }, "as": "e" },
+        { "retrieve": "Event", "id": "{e}", "record": { "DurationInMinutes": 150 } }
+      ]
+    },
+    {
+      "name": "event/needs a start and a duration or end",
+      "steps": [
+        { "create": "Event", "record": { "Subject": "{tag} when?", "DurationInMinutes": 30 }, "error": "REQUIRED_FIELD_MISSING" },
+        { "create": "Event", "record": { "Subject": "{tag} how long?", "StartDateTime": "2026-03-10T09:00:00Z" }, "error": "REQUIRED_FIELD_MISSING" }
+      ]
+    },
+    {
+      "name": "describe/What and Who refer to several objects",
+      "steps": [
+        {
+          "describe": "Task",
+          "fields": {
+            "WhatId": { "type": "reference", "relationshipName": "What", "referenceTo": { "$contains": ["Account", "Opportunity", "Case"] } },
+            "WhoId": { "type": "reference", "relationshipName": "Who", "referenceTo": { "$unordered": ["Contact", "Lead"] } },
+            "IsClosed": { "createable": false, "updateable": false }
+          }
+        }
+      ]
+    }
+  ]
+}

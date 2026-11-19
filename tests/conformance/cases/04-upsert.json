@@ -1,0 +1,128 @@
+{
+  "about": "Upsert, retrieve and delete by external id.",
+  "cases": [
+    {
+      "name": "creates when no record matches, updates when one does",
+      "steps": [
+        { "upsert": "Account", "field": "External_Key__c", "value": "{tag}-UPS-1", "record": { "Name": "{tag} upsert" }, "created": true, "as": "a" },
+        { "upsert": "Account", "field": "External_Key__c", "value": "{tag}-UPS-1", "record": { "Phone": "555-0100" }, "created": false },
+        { "retrieve": "Account", "id": "{a}", "record": { "Phone": "555-0100", "Name": "{tag} upsert", "External_Key__c": "{tag}-UPS-1" } },
+        { "query": "SELECT Id FROM Account WHERE External_Key__c = '{tag}-UPS-1'", "records": [{ "Id": "{a}" }] }
+      ]
+    },
+    {
+      "name": "matching ignores case for text external ids",
+      "steps": [
+        { "upsert": "Account", "field": "External_Key__c", "value": "{tag}-Mixed-Case", "record": { "Name": "{tag} case" }, "created": true, "as": "a" },
+        { "upsert": "Account", "field": "External_Key__c", "value": "{tag}-MIXED-CASE", "record": { "Phone": "1" }, "created": false },
+        { "retrieve": "Account", "id": "{a}", "record": { "Phone": "1", "External_Key__c": "{tag}-Mixed-Case" } }
+      ]
+    },
+    {
+      "name": "a create through upsert still checks required fields",
+      "steps": [
+        { "upsert": "Account", "field": "External_Key__c", "value": "{tag}-NO-NAME", "record": { "Phone": "1" }, "error": { "code": "REQUIRED_FIELD_MISSING", "fields": ["Name"] } }
+      ]
+    },
+    {
+      "name": "the response says whether it created: 201 then 200",
+      "steps": [
+        {
+          "request": "PATCH",
+          "path": "/sobjects/Account/External_Key__c/{tag}-STATUS",
+          "body": { "Name": "{tag} status" },
+          "status": 201,
+          "response": { "id": "$id", "success": true, "created": true, "errors": [] },
+          "save": { "a": "id" }
+        },
+        {
+          "request": "PATCH",
+          "path": "/sobjects/Account/External_Key__c/{tag}-STATUS",
+          "body": { "Phone": "2" },
+          "status": 200,
+          "response": { "id": "{a}", "success": true, "created": false }
+        },
+        { "delete": "Account", "id": "{a}" }
+      ]
+    },
+    {
+      "name": "upsert by Id updates the record",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} by id" }, "as": "a" },
+        { "request": "PATCH", "path": "/sobjects/Account/Id/{a}", "body": { "Phone": "3" }, "status": 200, "response": { "id": "{a}", "created": false } },
+        { "retrieve": "Account", "id": "{a}", "record": { "Phone": "3" } }
+      ]
+    },
+    {
+      "name": "batches report created per record",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} batch existing", "External_Key__c": "{tag}-B-1" }, "as": "existing" },
+        {
+          "upsert_many": "Account",
+          "field": "External_Key__c",
+          "records": [
+            { "Name": "{tag} batch 1", "External_Key__c": "{tag}-B-1" },
+            { "Name": "{tag} batch 2", "External_Key__c": "{tag}-B-2" }
+          ],
+          "results": [{ "created": false }, { "created": true }]
+        },
+        { "retrieve": "Account", "id": "{existing}", "record": { "Name": "{tag} batch 1" } },
+        { "query": "SELECT Name FROM Account WHERE External_Key__c LIKE '{tag}-B-%' ORDER BY Name", "pluck": "Name", "values": ["{tag} batch 1", "{tag} batch 2"] }
+      ]
+    },
+    {
+      "name": "batches fail per record without allOrNone",
+      "steps": [
+        {
+          "upsert_many": "Account",
+          "field": "External_Key__c",
+          "records": [
+            { "Name": "{tag} batch ok", "External_Key__c": "{tag}-BF-1" },
+            { "External_Key__c": "{tag}-BF-2", "Phone": "no name" }
+          ],
+          "results": [{ "created": true }, { "error": "REQUIRED_FIELD_MISSING", "fields": ["Name"] }]
+        }
+      ]
+    },
+    {
+      "name": "more than one match is a 300 Multiple Choices",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} dup 1", "Code__c": "{tag}-DUP" } },
+        { "create": "Project__c", "record": { "Name": "{tag} dup 2", "Code__c": "{tag}-DUP" } },
+        {
+          "request": "PATCH",
+          "path": "/sobjects/Project__c/Code__c/{tag}-DUP",
+          "body": { "Budget__c": 1 },
+          "status": 300,
+          "response": {
+            "$unordered": [
+              { "$regex": "^/services/data/v{version}/sobjects/Project__c/[a-zA-Z0-9]{18}$" },
+              { "$regex": "^/services/data/v{version}/sobjects/Project__c/[a-zA-Z0-9]{18}$" }
+            ]
+          }
+        },
+        { "query": "SELECT Budget__c FROM Project__c WHERE Code__c = '{tag}-DUP'", "pluck": "Budget__c", "values": [null, null] }
+      ]
+    },
+    {
+      "name": "a field that isn't an external id can't be used",
+      "steps": [{ "request": "PATCH", "path": "/sobjects/Account/Phone/555", "body": { "Name": "x" }, "status": 404, "error": "NOT_FOUND" }]
+    },
+    {
+      "name": "GET by external id",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} by key", "External_Key__c": "{tag}-GET-1" }, "as": "a" },
+        { "request": "GET", "path": "/sobjects/Account/External_Key__c/{tag}-GET-1", "status": 200, "response": { "Id": "{a}", "Name": "{tag} by key" } },
+        { "request": "GET", "path": "/sobjects/Account/External_Key__c/{tag}-NONE", "status": 404, "error": "NOT_FOUND" }
+      ]
+    },
+    {
+      "name": "DELETE by external id",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} delete by key", "External_Key__c": "{tag}-DEL-1" }, "as": "a" },
+        { "request": "DELETE", "path": "/sobjects/Account/External_Key__c/{tag}-DEL-1", "status": 204 },
+        { "query": "SELECT Id FROM Account WHERE Id = '{a}'", "records": [] }
+      ]
+    }
+  ]
+}

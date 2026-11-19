@@ -1,0 +1,139 @@
+{
+  "about": "Validation rules: they stop a save with their message on their field, on create and update, alone or in collections and composite requests; inactive rules don't run; ISNEW, ISCHANGED and PRIORVALUE see the record's earlier state.",
+  "cases": [
+    {
+      "name": "create/a rule rejects a record with its message, on its field",
+      "steps": [
+        {
+          "create": "Project__c",
+          "record": { "Name": "{tag} negative", "Budget__c": -1 },
+          "error": { "code": "FIELD_CUSTOM_VALIDATION_EXCEPTION", "fields": ["Budget__c"], "message": "Budget can't be negative" }
+        },
+        { "query": "SELECT COUNT() FROM Project__c WHERE Name = '{tag} negative'", "total": 0 }
+      ]
+    },
+    {
+      "name": "create/a REGEX rule",
+      "steps": [
+        {
+          "create": "Project__c",
+          "record": { "Name": "{tag} lower", "Code__c": "prj-12" },
+          "error": { "code": "FIELD_CUSTOM_VALIDATION_EXCEPTION", "fields": ["Code__c"], "message": "PRJ codes look like PRJ-123." }
+        },
+        {
+          "create": "Project__c",
+          "record": { "Name": "{tag} trailing", "Code__c": "PRJ-123x" },
+          "error": { "code": "FIELD_CUSTOM_VALIDATION_EXCEPTION", "fields": ["Code__c"] }
+        },
+        { "create": "Project__c", "record": { "Name": "{tag} good", "Code__c": "PRJ-123" } },
+        { "create": "Project__c", "record": { "Name": "{tag} other code", "Code__c": "ab-1" } },
+        { "create": "Project__c", "record": { "Name": "{tag} no code" } }
+      ]
+    },
+    {
+      "name": "update/a rule checks the record as it would be after the change",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} fine", "Budget__c": 10 }, "as": "p" },
+        {
+          "update": "Project__c",
+          "id": "{p}",
+          "record": { "Budget__c": -5 },
+          "error": { "code": "FIELD_CUSTOM_VALIDATION_EXCEPTION", "fields": ["Budget__c"] }
+        },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Budget__c": 10 } },
+        { "update": "Project__c", "id": "{p}", "record": { "Name": "{tag} renamed" } },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Name": "{tag} renamed", "Budget__c": 10 } }
+      ]
+    },
+    {
+      "name": "update/ISCHANGED and PRIORVALUE see the stored value",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} keyed", "External_Key__c": "LOCKED-{tag}" }, "as": "a" },
+        { "update": "Account", "id": "{a}", "record": { "Name": "{tag} still fine" } },
+        {
+          "update": "Account",
+          "id": "{a}",
+          "record": { "External_Key__c": "NEW-{tag}" },
+          "error": { "code": "FIELD_CUSTOM_VALIDATION_EXCEPTION", "message": "A locked external key can't be changed." }
+        },
+        { "retrieve": "Account", "id": "{a}", "record": { "External_Key__c": "LOCKED-{tag}" } },
+        { "create": "Account", "record": { "Name": "{tag} open", "External_Key__c": "OPEN-{tag}" }, "as": "b" },
+        { "update": "Account", "id": "{b}", "record": { "External_Key__c": "LOCKED-{tag}2" } }
+      ]
+    },
+    {
+      "name": "upsert/rules apply to both inserts and updates",
+      "steps": [
+        {
+          "upsert": "Account",
+          "field": "External_Key__c",
+          "value": "LOCKED-{tag}u",
+          "record": { "Name": "{tag} upserted" },
+          "created": true,
+          "as": "a"
+        },
+        {
+          "update": "Account",
+          "id": "{a}",
+          "record": { "External_Key__c": "OTHER-{tag}" },
+          "error": "FIELD_CUSTOM_VALIDATION_EXCEPTION"
+        }
+      ]
+    },
+    {
+      "name": "collections/each record is checked on its own",
+      "steps": [
+        {
+          "create_many": "Project__c",
+          "records": [
+            { "Name": "{tag} ok", "Budget__c": 5 },
+            { "Name": "{tag} bad", "Budget__c": -5 },
+            { "Name": "{tag} bad code", "Code__c": "PRJ-1" }
+          ],
+          "results": [
+            "ok",
+            { "error": "FIELD_CUSTOM_VALIDATION_EXCEPTION", "fields": ["Budget__c"] },
+            { "error": "FIELD_CUSTOM_VALIDATION_EXCEPTION", "fields": ["Code__c"] }
+          ]
+        },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%'", "records": [{ "Name": "{tag} ok" }] }
+      ]
+    },
+    {
+      "name": "collections/with allOrNone one failing rule rolls back them all",
+      "steps": [
+        {
+          "create_many": "Project__c",
+          "all_or_none": true,
+          "records": [{ "Name": "{tag} ok", "Budget__c": 5 }, { "Name": "{tag} bad", "Budget__c": -5 }],
+          "results": [
+            { "error": "ALL_OR_NONE_OPERATION_ROLLED_BACK" },
+            { "error": "FIELD_CUSTOM_VALIDATION_EXCEPTION", "fields": ["Budget__c"] }
+          ]
+        },
+        { "query": "SELECT COUNT() FROM Project__c WHERE Name LIKE '{tag}%'", "total": 0 }
+      ]
+    },
+    {
+      "name": "composite/a failing rule fails its subrequest",
+      "steps": [
+        {
+          "composite": {
+            "allOrNone": false,
+            "compositeRequest": [
+              { "method": "POST", "url": "/services/data/v{version}/sobjects/Project__c", "referenceId": "bad", "body": { "Name": "{tag} c", "Budget__c": -1 } }
+            ]
+          },
+          "responses": [{ "httpStatusCode": 400, "body": [{ "errorCode": "FIELD_CUSTOM_VALIDATION_EXCEPTION", "fields": ["Budget__c"] }] }]
+        }
+      ]
+    },
+    {
+      "name": "inactive/an inactive rule never runs",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} anything goes" }, "as": "p" },
+        { "update": "Project__c", "id": "{p}", "record": { "Notes__c": "still fine" } }
+      ]
+    }
+  ]
+}

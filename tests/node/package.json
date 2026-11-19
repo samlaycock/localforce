@@ -1,0 +1,17 @@
+{
+  "name": "localforce-node-tests",
+  "private": true,
+  "type": "module",
+  "description": "Tests localforce through jsforce, the Node.js Salesforce client. See tests/README.md.",
+  "scripts": {
+    "test": "node run.mjs",
+    "ui": "node ui-smoke.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "jsforce": "^3.13.1",
+    "puppeteer-core": "^24.0.0"
+  }
+}

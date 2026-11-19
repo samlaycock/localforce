@@ -1,0 +1,244 @@
+{
+  "about": "The sales objects beyond Opportunity: opportunity products and their price rules and effect on the opportunity, contact roles, campaign members, contracts, orders and assets.",
+  "setup": [
+    { "query": "SELECT Id FROM Pricebook2 WHERE IsStandard = true", "save": { "std": "Id" } },
+    { "create": "Product2", "record": { "Name": "{tag} Widget", "ProductCode": "{tag}-W", "IsActive": true }, "as": "prod" },
+    { "create": "PricebookEntry", "record": { "Pricebook2Id": "{std}", "Product2Id": "{prod}", "UnitPrice": 10, "IsActive": true }, "as": "entry" },
+    { "create": "Product2", "record": { "Name": "{tag} Retired", "IsActive": true }, "as": "old_prod" },
+    { "create": "PricebookEntry", "record": { "Pricebook2Id": "{std}", "Product2Id": "{old_prod}", "UnitPrice": 4, "IsActive": false }, "as": "old_entry" },
+    { "create": "Account", "record": { "Name": "{tag} sales account" }, "as": "acct" }
+  ],
+  "cases": [
+    {
+      "name": "OpportunityLineItem/prices and names come from the price book entry",
+      "steps": [
+        { "create": "Opportunity", "record": { "Name": "{tag} deal", "AccountId": "{acct}", "StageName": "Prospecting", "CloseDate": "{date:30}" }, "as": "opp" },
+        { "create": "OpportunityLineItem", "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{entry}", "Quantity": 3, "UnitPrice": 10, "Discount": 10 }, "as": "line" },
+        {
+          "retrieve": "OpportunityLineItem",
+          "id": "{line}",
+          "record": { "Name": "{tag} deal {tag} Widget", "ProductCode": "{tag}-W", "Product2Id": "{prod}", "ListPrice": 10, "UnitPrice": 10, "Subtotal": 30, "TotalPrice": 27 }
+        },
+        { "create": "OpportunityLineItem", "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{entry}", "Quantity": 4, "TotalPrice": 100 }, "as": "line2" },
+        { "retrieve": "OpportunityLineItem", "id": "{line2}", "record": { "UnitPrice": 25, "TotalPrice": 100 } }
+      ]
+    },
+    {
+      "name": "OpportunityLineItem/the opportunity takes the price book, amount and quantity",
+      "steps": [
+        { "create": "Opportunity", "record": { "Name": "{tag} deal", "StageName": "Prospecting", "CloseDate": "{date:30}", "Amount": 5 }, "as": "opp" },
+        { "create": "OpportunityLineItem", "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{entry}", "Quantity": 3, "UnitPrice": 10 } },
+        { "create": "OpportunityLineItem", "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{entry}", "Quantity": 2, "UnitPrice": 50 } },
+        {
+          "retrieve": "Opportunity",
+          "id": "{opp}",
+          "record": { "Amount": 130, "Pricebook2Id": "{std}", "HasOpportunityLineItem": true, "TotalOpportunityQuantity": 5 }
+        },
+        {
+          "query": "SELECT Name, (SELECT Quantity, TotalPrice FROM OpportunityLineItems ORDER BY TotalPrice) FROM Opportunity WHERE Id = '{opp}'",
+          "records": [{ "Name": "{tag} deal", "OpportunityLineItems": [{ "Quantity": 3, "TotalPrice": 30 }, { "Quantity": 2, "TotalPrice": 100 }] }]
+        },
+        {
+          "query": "SELECT PricebookEntry.Product2.Name, Opportunity.Name FROM OpportunityLineItem WHERE OpportunityId = '{opp}' AND Quantity = 3",
+          "records": [{ "PricebookEntry": { "Product2": { "Name": "{tag} Widget" } }, "Opportunity": { "Name": "{tag} deal" } }]
+        }
+      ]
+    },
+    {
+      "name": "OpportunityLineItem/with products, the amount can't be written",
+      "steps": [
+        { "create": "Opportunity", "record": { "Name": "{tag} deal", "StageName": "Prospecting", "CloseDate": "{date:30}" }, "as": "opp" },
+        { "create": "OpportunityLineItem", "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{entry}", "Quantity": 1, "UnitPrice": 40 } },
+        { "update": "Opportunity", "id": "{opp}", "record": { "Amount": 1 } },
+        { "retrieve": "Opportunity", "id": "{opp}", "record": { "Amount": 40 } }
+      ]
+    },
+    {
+      "name": "OpportunityLineItem/a new quantity keeps the total, a new discount keeps the unit price",
+      "steps": [
+        { "create": "Opportunity", "record": { "Name": "{tag} deal", "StageName": "Prospecting", "CloseDate": "{date:30}" }, "as": "opp" },
+        { "create": "OpportunityLineItem", "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{entry}", "Quantity": 2, "UnitPrice": 30 }, "as": "line" },
+        { "update": "OpportunityLineItem", "id": "{line}", "record": { "Quantity": 4 } },
+        { "retrieve": "OpportunityLineItem", "id": "{line}", "record": { "Quantity": 4, "UnitPrice": 15, "TotalPrice": 60 } },
+        { "update": "OpportunityLineItem", "id": "{line}", "record": { "Discount": 50 } },
+        { "retrieve": "OpportunityLineItem", "id": "{line}", "record": { "UnitPrice": 15, "TotalPrice": 30 } },
+        { "update": "OpportunityLineItem", "id": "{line}", "record": { "TotalPrice": 40 } },
+        { "retrieve": "OpportunityLineItem", "id": "{line}", "record": { "UnitPrice": 20, "TotalPrice": 40 } },
+        { "retrieve": "Opportunity", "id": "{opp}", "record": { "Amount": 40 } }
+      ]
+    },
+    {
+      "name": "OpportunityLineItem/price rules",
+      "steps": [
+        { "create": "Opportunity", "record": { "Name": "{tag} deal", "StageName": "Prospecting", "CloseDate": "{date:30}" }, "as": "opp" },
+        {
+          "create": "OpportunityLineItem",
+          "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{entry}", "Quantity": 1, "UnitPrice": 10, "TotalPrice": 10 },
+          "error": { "code": "FIELD_INTEGRITY_EXCEPTION", "fields": ["UnitPrice"], "message": "only one of unit price or total price may be specified" }
+        },
+        {
+          "create": "OpportunityLineItem",
+          "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{entry}", "Quantity": 0, "UnitPrice": 10 },
+          "error": { "code": "FIELD_INTEGRITY_EXCEPTION", "fields": ["Quantity"], "message": "quantity must be nonzero" }
+        },
+        {
+          "create": "OpportunityLineItem",
+          "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{old_entry}", "Quantity": 1, "UnitPrice": 10 },
+          "error": { "code": "FIELD_INTEGRITY_EXCEPTION", "fields": ["PricebookEntryId"], "message": "pricebook entry is inactive" }
+        },
+        {
+          "create": "OpportunityLineItem",
+          "record": { "OpportunityId": "{opp}", "Quantity": 1, "UnitPrice": 10 },
+          "error": { "code": "FIELD_INTEGRITY_EXCEPTION", "message": "must specify pricebook entry id" }
+        },
+        { "create": "OpportunityLineItem", "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{entry}", "Quantity": 1 }, "error": ["FIELD_INTEGRITY_EXCEPTION", "REQUIRED_FIELD_MISSING"] }
+      ]
+    },
+    {
+      "name": "OpportunityLineItem/the entry must be in the opportunity's price book",
+      "steps": [
+        { "create": "Pricebook2", "record": { "Name": "{tag} Partner Prices", "IsActive": true }, "as": "book" },
+        { "create": "PricebookEntry", "record": { "Pricebook2Id": "{book}", "Product2Id": "{prod}", "UnitPrice": 8, "IsActive": true }, "as": "partner_entry" },
+        { "create": "Opportunity", "record": { "Name": "{tag} deal", "StageName": "Prospecting", "CloseDate": "{date:30}", "Pricebook2Id": "{std}" }, "as": "opp" },
+        {
+          "create": "OpportunityLineItem",
+          "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{partner_entry}", "Quantity": 1, "UnitPrice": 8 },
+          "error": { "code": "FIELD_INTEGRITY_EXCEPTION", "message": "pricebook entry is in a different pricebook than the one assigned to the opportunity" }
+        },
+        { "create": "OpportunityLineItem", "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{entry}", "Quantity": 1, "UnitPrice": 10 } },
+        { "update": "Opportunity", "id": "{opp}", "record": { "Pricebook2Id": "{book}" }, "error": "FIELD_INTEGRITY_EXCEPTION" }
+      ]
+    },
+    {
+      "name": "OpportunityLineItem/deleting lines, and the opportunity",
+      "steps": [
+        { "create": "Opportunity", "record": { "Name": "{tag} deal", "StageName": "Prospecting", "CloseDate": "{date:30}" }, "as": "opp" },
+        { "create": "OpportunityLineItem", "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{entry}", "Quantity": 1, "UnitPrice": 10 }, "as": "l1" },
+        { "create": "OpportunityLineItem", "record": { "OpportunityId": "{opp}", "PricebookEntryId": "{entry}", "Quantity": 1, "UnitPrice": 20 }, "as": "l2" },
+        { "delete": "OpportunityLineItem", "id": "{l1}" },
+        { "retrieve": "Opportunity", "id": "{opp}", "record": { "Amount": 20, "TotalOpportunityQuantity": 1 } },
+        { "delete": "Opportunity", "id": "{opp}" },
+        { "query": "SELECT Id FROM OpportunityLineItem WHERE OpportunityId = '{opp}'", "records": [] }
+      ]
+    },
+    {
+      "name": "OpportunityLineItem/describe",
+      "steps": [
+        {
+          "describe": "OpportunityLineItem",
+          "object": { "keyPrefix": "00k", "createable": true },
+          "fields": {
+            "OpportunityId": { "type": "reference", "createable": true, "updateable": false, "nillable": false },
+            "PricebookEntryId": { "type": "reference", "createable": true, "updateable": false },
+            "Quantity": { "type": "double", "createable": true, "updateable": true },
+            "UnitPrice": { "type": "currency", "createable": true, "updateable": true },
+            "TotalPrice": { "type": "currency", "createable": true, "updateable": true },
+            "ListPrice": { "type": "currency", "createable": false, "updateable": false },
+            "Subtotal": { "createable": false, "updateable": false },
+            "Name": { "createable": false, "updateable": false }
+          }
+        },
+        {
+          "describe": "Opportunity",
+          "fields": { "HasOpportunityLineItem": { "type": "boolean", "createable": false }, "ExpectedRevenue": { "type": "currency", "createable": false } },
+          "child_relationships": {
+            "OpportunityLineItems": { "childSObject": "OpportunityLineItem", "field": "OpportunityId" },
+            "OpportunityContactRoles": { "childSObject": "OpportunityContactRole", "field": "OpportunityId" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "OpportunityContactRole/one primary contact per opportunity",
+      "steps": [
+        { "create": "Opportunity", "record": { "Name": "{tag} deal", "StageName": "Prospecting", "CloseDate": "{date:30}" }, "as": "opp" },
+        { "create": "Contact", "record": { "LastName": "{tag} buyer", "AccountId": "{acct}" }, "as": "c1" },
+        { "create": "Contact", "record": { "LastName": "{tag} user", "AccountId": "{acct}" }, "as": "c2" },
+        { "create": "OpportunityContactRole", "record": { "OpportunityId": "{opp}", "ContactId": "{c1}", "Role": "Economic Buyer", "IsPrimary": true }, "as": "r1" },
+        { "create": "OpportunityContactRole", "record": { "OpportunityId": "{opp}", "ContactId": "{c2}", "Role": "Business User", "IsPrimary": true }, "as": "r2" },
+        {
+          "query": "SELECT Contact.LastName, Role, IsPrimary FROM OpportunityContactRole WHERE OpportunityId = '{opp}' ORDER BY Contact.LastName",
+          "records": [
+            { "Contact": { "LastName": "{tag} buyer" }, "Role": "Economic Buyer", "IsPrimary": false },
+            { "Contact": { "LastName": "{tag} user" }, "Role": "Business User", "IsPrimary": true }
+          ]
+        },
+        {
+          "query": "SELECT (SELECT Role FROM OpportunityContactRoles) FROM Contact WHERE Id = '{c1}'",
+          "records": [{ "OpportunityContactRoles": [{ "Role": "Economic Buyer" }] }]
+        }
+      ]
+    },
+    {
+      "name": "CampaignMember/members, responses and the campaign's counts",
+      "steps": [
+        { "create": "Campaign", "record": { "Name": "{tag} launch", "IsActive": true }, "as": "camp" },
+        { "create": "Lead", "record": { "FirstName": "Ada", "LastName": "{tag} lead", "Company": "{tag} Engines" }, "as": "lead" },
+        { "create": "Contact", "record": { "LastName": "{tag} contact", "AccountId": "{acct}" }, "as": "contact" },
+        { "create": "CampaignMember", "record": { "CampaignId": "{camp}", "LeadId": "{lead}" }, "as": "m1" },
+        { "create": "CampaignMember", "record": { "CampaignId": "{camp}", "LeadId": "{lead}" }, "error": "DUPLICATE_VALUE" },
+        { "create": "CampaignMember", "record": { "CampaignId": "{camp}", "ContactId": "{contact}", "Status": "Responded" }, "as": "m2" },
+        { "retrieve": "CampaignMember", "id": "{m1}", "record": { "Status": "Sent", "HasResponded": false, "FirstName": "Ada", "LastName": "{tag} lead" } },
+        { "retrieve": "CampaignMember", "id": "{m2}", "record": { "HasResponded": true, "FirstRespondedDate": "{date:0}" } },
+        { "retrieve": "Campaign", "id": "{camp}", "record": { "NumberOfLeads": 1, "NumberOfContacts": 1, "NumberOfResponses": 1 } },
+        {
+          "query": "SELECT Name, (SELECT Lead.LastName FROM CampaignMembers WHERE LeadId != null) FROM Campaign WHERE Id = '{camp}'",
+          "records": [{ "Name": "{tag} launch", "CampaignMembers": [{ "Lead": { "LastName": "{tag} lead" } }] }]
+        }
+      ]
+    },
+    {
+      "name": "Campaign/opportunities count towards their campaign",
+      "steps": [
+        { "create": "Campaign", "record": { "Name": "{tag} launch" }, "as": "camp" },
+        { "create": "Opportunity", "record": { "Name": "{tag} won", "StageName": "Closed Won", "CloseDate": "{date:0}", "Amount": 300, "CampaignId": "{camp}" } },
+        { "create": "Opportunity", "record": { "Name": "{tag} open", "StageName": "Prospecting", "CloseDate": "{date:30}", "Amount": 100, "CampaignId": "{camp}" } },
+        {
+          "retrieve": "Campaign",
+          "id": "{camp}",
+          "record": { "NumberOfOpportunities": 2, "NumberOfWonOpportunities": 1, "AmountAllOpportunities": 400, "AmountWonOpportunities": 300 }
+        }
+      ]
+    },
+    {
+      "name": "Contract/the end date follows the start date and term",
+      "steps": [
+        { "create": "Contract", "record": { "AccountId": "{acct}", "StartDate": "2026-01-15", "ContractTerm": 12 }, "as": "k" },
+        { "retrieve": "Contract", "id": "{k}", "record": { "Status": "Draft", "StatusCode": "Draft", "EndDate": "2027-01-14", "ContractNumber": { "$regex": "^\\d{8}$" } } },
+        { "update": "Contract", "id": "{k}", "record": { "ContractTerm": 6 } },
+        { "retrieve": "Contract", "id": "{k}", "record": { "EndDate": "2026-07-14" } },
+        { "query": "SELECT (SELECT ContractTerm FROM Contracts) FROM Account WHERE Id = '{acct}'", "records": [{ "Contracts": [{ "ContractTerm": 6 }] }] }
+      ]
+    },
+    {
+      "name": "Order/products, the total and activation",
+      "steps": [
+        { "create": "Order", "record": { "AccountId": "{acct}", "EffectiveDate": "{date:0}", "Status": "Activated", "Pricebook2Id": "{std}" }, "error": "FAILED_ACTIVATION" },
+        { "create": "Order", "record": { "AccountId": "{acct}", "EffectiveDate": "{date:0}", "Status": "Draft", "Pricebook2Id": "{std}" }, "as": "order" },
+        { "update": "Order", "id": "{order}", "record": { "Status": "Activated" }, "error": "FAILED_ACTIVATION" },
+        { "create": "OrderItem", "record": { "OrderId": "{order}", "PricebookEntryId": "{entry}", "Quantity": 3, "UnitPrice": 9.5 }, "as": "item" },
+        { "retrieve": "OrderItem", "id": "{item}", "record": { "TotalPrice": 28.5, "ListPrice": 10, "Product2Id": "{prod}" } },
+        { "retrieve": "Order", "id": "{order}", "record": { "TotalAmount": 28.5, "StatusCode": "Draft", "OrderNumber": { "$regex": "^\\d{8}$" } } },
+        { "update": "Order", "id": "{order}", "record": { "Status": "Activated" } },
+        { "retrieve": "Order", "id": "{order}", "record": { "StatusCode": "Activated", "ActivatedDate": "$recent" } },
+        { "create": "OrderItem", "record": { "OrderId": "{order}", "PricebookEntryId": "{entry}", "Quantity": 1, "UnitPrice": 10 }, "error": "ENTITY_IS_LOCKED" },
+        { "update": "OrderItem", "id": "{item}", "record": { "Quantity": 4 } },
+        { "retrieve": "Order", "id": "{order}", "record": { "TotalAmount": 38 } },
+        { "delete": "OrderItem", "id": "{item}", "error": "ENTITY_IS_LOCKED" },
+        { "update": "Order", "id": "{order}", "record": { "Status": "Draft" } },
+        { "retrieve": "Order", "id": "{order}", "record": { "StatusCode": "Draft" } }
+      ]
+    },
+    {
+      "name": "Asset/belongs to an account and a product",
+      "steps": [
+        { "create": "Asset", "record": { "Name": "{tag} unit", "AccountId": "{acct}", "Product2Id": "{prod}", "SerialNumber": "{tag}-1", "Quantity": 2 }, "as": "asset" },
+        {
+          "query": "SELECT Name, Account.Name, Product2.Name FROM Asset WHERE Id = '{asset}'",
+          "records": [{ "Name": "{tag} unit", "Account": { "Name": "{tag} sales account" }, "Product2": { "Name": "{tag} Widget" } }]
+        },
+        { "query": "SELECT (SELECT SerialNumber FROM Assets) FROM Account WHERE Id = '{acct}'", "records": [{ "Assets": [{ "SerialNumber": "{tag}-1" }] }] }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,200 @@
+{
+  "about": "Formula and roll-up summary fields: their values on read, in SOQL filters and ordering, blank handling, and staying current as the records they depend on change.",
+  "cases": [
+    {
+      "name": "formula/a number formula is evaluated",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} formula", "Budget__c": 12500 }, "as": "p" },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Budget_K__c": 12.5 } },
+        { "query": "SELECT Budget_K__c FROM Project__c WHERE Id = '{p}'", "records": [{ "Budget_K__c": 12.5 }] }
+      ]
+    },
+    {
+      "name": "formula/blank fields count as zero by default",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} no budget" }, "as": "p" },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Budget_K__c": 0 } }
+      ]
+    },
+    {
+      "name": "formula/with BlankAsBlank a blank field makes the result blank, and so does dividing by zero",
+      "steps": [
+        {
+          "create_many": "Project__c",
+          "records": [
+            { "Name": "{tag} per head", "Budget__c": 1000, "Headcount__c": 8 },
+            { "Name": "{tag} nobody", "Budget__c": 1000 },
+            { "Name": "{tag} zero", "Budget__c": 1000, "Headcount__c": 0 }
+          ],
+          "as": ["a", "b", "c"]
+        },
+        {
+          "retrieve_many": "Project__c",
+          "ids": ["{a}", "{b}", "{c}"],
+          "fields": ["Budget_Per_Head__c"],
+          "records": [{ "Budget_Per_Head__c": 125 }, { "Budget_Per_Head__c": null }, { "Budget_Per_Head__c": null }]
+        }
+      ]
+    },
+    {
+      "name": "formula/a checkbox formula",
+      "steps": [
+        {
+          "create_many": "Project__c",
+          "records": [
+            { "Name": "{tag} big budget", "Budget__c": 250000 },
+            { "Name": "{tag} big team", "Headcount__c": 51 },
+            { "Name": "{tag} small", "Budget__c": 10, "Headcount__c": 2 }
+          ]
+        },
+        {
+          "query": "SELECT Name, Is_Big__c FROM Project__c WHERE Name LIKE '{tag}%' ORDER BY Name",
+          "records": [
+            { "Name": "{tag} big budget", "Is_Big__c": true },
+            { "Name": "{tag} big team", "Is_Big__c": true },
+            { "Name": "{tag} small", "Is_Big__c": false }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "formula/text functions: IF, ISBLANK, TEXT of a picklist, UPPER, LEFT and &",
+      "steps": [
+        {
+          "create_many": "Project__c",
+          "records": [
+            { "Name": "{tag} apollo mission", "Status__c": "Active", "Code__c": "AP-1" },
+            { "Name": "{tag} gemini", "Status__c": "Done" }
+          ],
+          "as": ["a", "g"]
+        },
+        {
+          "retrieve_many": "Project__c",
+          "ids": ["{a}", "{g}"],
+          "fields": ["Summary__c"],
+          "records": [
+            { "Summary__c": { "$regex": "^Active: LF[A-Z0-9]{12} APOLL \\[AP-1\\]$" } },
+            { "Summary__c": { "$regex": "^Done: LF[A-Z0-9]{12} GEMIN$" } }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "formula/date functions: ADDMONTHS keeps month ends, and date arithmetic",
+      "steps": [
+        {
+          "create_many": "Project__c",
+          "records": [
+            { "Name": "{tag} month end", "Start_Date__c": "2024-01-31" },
+            { "Name": "{tag} mid month", "Start_Date__c": "2024-11-15" },
+            { "Name": "{tag} no start" }
+          ],
+          "as": ["a", "b", "c"]
+        },
+        {
+          "retrieve_many": "Project__c",
+          "ids": ["{a}", "{b}", "{c}"],
+          "fields": ["End_Date__c"],
+          "records": [{ "End_Date__c": "2024-04-29" }, { "End_Date__c": "2025-02-14" }, { "End_Date__c": null }]
+        }
+      ]
+    },
+    {
+      "name": "formula/a parent's field, which follows the parent as it changes",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} Formula Parent" }, "as": "acct" },
+        { "create": "Project__c", "record": { "Name": "{tag} child", "Account__c": "{acct}" }, "as": "p" },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Account_Name__c": "{tag} Formula Parent" } },
+        { "update": "Account", "id": "{acct}", "record": { "Name": "{tag} Renamed Parent" } },
+        { "query": "SELECT Account_Name__c FROM Project__c WHERE Id = '{p}'", "records": [{ "Account_Name__c": "{tag} Renamed Parent" }] },
+        { "update": "Project__c", "id": "{p}", "record": { "Account__c": null } },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Account_Name__c": null } }
+      ]
+    },
+    {
+      "name": "formula/can be filtered and sorted on",
+      "steps": [
+        {
+          "create_many": "Project__c",
+          "records": [
+            { "Name": "{tag} f1", "Budget__c": 3000 },
+            { "Name": "{tag} f2", "Budget__c": 1000 },
+            { "Name": "{tag} f3", "Budget__c": 2000 },
+            { "Name": "{tag} f4", "Budget__c": 500 }
+          ]
+        },
+        {
+          "query": "SELECT Name, Budget_K__c FROM Project__c WHERE Name LIKE '{tag}%' AND Budget_K__c >= 1 ORDER BY Budget_K__c DESC",
+          "records": [
+            { "Name": "{tag} f1", "Budget_K__c": 3 },
+            { "Name": "{tag} f3", "Budget_K__c": 2 },
+            { "Name": "{tag} f2", "Budget_K__c": 1 }
+          ]
+        },
+        { "query": "SELECT COUNT() FROM Project__c WHERE Name LIKE '{tag}%' AND Is_Big__c = false", "total": 4 }
+      ]
+    },
+    {
+      "name": "rollup/SUM and filtered COUNT of detail records",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} rolled up" }, "as": "p" },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Total_Hours__c": 0, "Open_Tasks__c": 0 } },
+        {
+          "create_many": "Task_Item__c",
+          "records": [
+            { "Project__c": "{p}", "Hours__c": 2.5 },
+            { "Project__c": "{p}", "Hours__c": 4, "Done__c": true },
+            { "Project__c": "{p}", "Hours__c": 1.5 }
+          ],
+          "as": ["t1", "t2", "t3"]
+        },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Total_Hours__c": 8, "Open_Tasks__c": 2 } },
+        { "update": "Task_Item__c", "id": "{t1}", "record": { "Done__c": true, "Hours__c": 3 } },
+        { "retrieve": "Project__c", "id": "{p}", "record": { "Total_Hours__c": 8.5, "Open_Tasks__c": 1 } },
+        { "delete": "Task_Item__c", "id": "{t3}" },
+        {
+          "query": "SELECT Total_Hours__c, Open_Tasks__c FROM Project__c WHERE Id = '{p}'",
+          "records": [{ "Total_Hours__c": 7, "Open_Tasks__c": 0 }]
+        },
+        { "query": "SELECT COUNT() FROM Project__c WHERE Id = '{p}' AND Total_Hours__c > 5", "total": 1 }
+      ]
+    },
+    {
+      "name": "describe/formula and roll-up fields are calculated and read-only",
+      "steps": [
+        {
+          "describe": "Project__c",
+          "fields": {
+            "Account_Name__c": { "type": "string", "calculated": true, "createable": false, "updateable": false, "calculatedFormula": "Account__r.Name" },
+            "Is_Big__c": { "type": "boolean", "calculated": true, "createable": false },
+            "End_Date__c": { "type": "date", "calculated": true },
+            "Budget_Per_Head__c": { "type": "currency", "calculated": true, "scale": 2 },
+            "Total_Hours__c": { "calculated": true, "createable": false, "updateable": false }
+          }
+        }
+      ]
+    },
+    {
+      "name": "access/formula and roll-up fields can't be written",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} x", "Summary__c": "nope" }, "error": { "code": "INVALID_FIELD_FOR_INSERT_UPDATE", "fields": ["Summary__c"] } },
+        { "create": "Project__c", "record": { "Name": "{tag} y", "Total_Hours__c": 1 }, "error": { "code": "INVALID_FIELD_FOR_INSERT_UPDATE", "fields": ["Total_Hours__c"] } }
+      ]
+    },
+    {
+      "name": "default/a default-value formula is worked out when a record is created without the field",
+      "steps": [
+        { "create": "Project__c", "record": { "Name": "{tag} defaulted" }, "as": "a" },
+        { "retrieve": "Project__c", "id": "{a}", "record": { "Due_Date__c": "{date:30}" } },
+        { "create": "Project__c", "record": { "Name": "{tag} given", "Due_Date__c": "2030-01-01" }, "as": "b" },
+        { "retrieve": "Project__c", "id": "{b}", "record": { "Due_Date__c": "2030-01-01" } },
+        { "update": "Project__c", "id": "{b}", "record": { "Due_Date__c": null } },
+        { "retrieve": "Project__c", "id": "{b}", "record": { "Due_Date__c": null } },
+        {
+          "describe": "Project__c",
+          "fields": { "Due_Date__c": { "defaultedOnCreate": true, "calculated": false, "createable": true } }
+        }
+      ]
+    }
+  ]
+}

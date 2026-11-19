@@ -1,0 +1,167 @@
+{
+  "about": "The built-in standard objects: their required fields, defaults and derived fields, the logic they run on save (Opportunity stages, closing cases, price book rules), and relationships between them.",
+  "cases": [
+    {
+      "name": "User/the session user can be read and queried",
+      "steps": [
+        { "retrieve": "User", "id": "{user}", "record": { "Id": "{user}", "IsActive": true, "Username": "$notnull", "Email": "$notnull", "LastName": "$notnull" } },
+        { "query": "SELECT Id, IsActive FROM User WHERE Id = '{user}'", "records": [{ "Id": "{user}", "IsActive": true }] }
+      ]
+    },
+    {
+      "name": "Lead/compound Name and required Company",
+      "steps": [
+        { "create": "Lead", "record": { "FirstName": "Grace", "LastName": "{tag} Hopper", "Company": "{tag} Navy" }, "as": "l" },
+        { "retrieve": "Lead", "id": "{l}", "record": { "Name": "Grace {tag} Hopper", "Company": "{tag} Navy", "IsConverted": false, "Status": "$notnull" } }
+      ]
+    },
+    {
+      "name": "Opportunity/belongs to an Account and shows up under it",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} opp account" }, "as": "a" },
+        {
+          "create": "Opportunity",
+          "record": { "Name": "{tag} deal", "AccountId": "{a}", "StageName": "Prospecting", "CloseDate": "{date:30}", "Amount": 12500.5 },
+          "as": "o"
+        },
+        { "retrieve": "Opportunity", "id": "{o}", "record": { "Amount": 12500.5, "CloseDate": "{date:30}", "StageName": "Prospecting", "AccountId": "{a}" } },
+        {
+          "query": "SELECT Name, (SELECT Name, Amount FROM Opportunities) FROM Account WHERE Id = '{a}'",
+          "records": [{ "Name": "{tag} opp account", "Opportunities": [{ "Name": "{tag} deal", "Amount": 12500.5 }] }]
+        },
+        { "query": "SELECT SUM(Amount) total FROM Opportunity WHERE AccountId = '{a}'", "records": [{ "total": 12500.5 }] }
+      ]
+    },
+    {
+      "name": "Case/gets a CaseNumber and links to an Account and Contact",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} case account" }, "as": "a" },
+        { "create": "Contact", "record": { "LastName": "{tag} case contact", "AccountId": "{a}" }, "as": "c" },
+        { "create": "Case", "record": { "Subject": "{tag} broken", "AccountId": "{a}", "ContactId": "{c}", "Origin": "Web" }, "as": "k" },
+        { "retrieve": "Case", "id": "{k}", "record": { "CaseNumber": { "$regex": "^\\d{8}$" }, "Subject": "{tag} broken", "IsClosed": false } },
+        {
+          "query": "SELECT Subject, Contact.LastName, Account.Name FROM Case WHERE Id = '{k}'",
+          "records": [{ "Subject": "{tag} broken", "Contact": { "LastName": "{tag} case contact" }, "Account": { "Name": "{tag} case account" } }]
+        },
+        { "query": "SELECT (SELECT Subject FROM Cases) FROM Contact WHERE Id = '{c}'", "records": [{ "Cases": [{ "Subject": "{tag} broken" }] }] }
+      ]
+    },
+    {
+      "name": "Case/CaseNumbers count up",
+      "steps": [
+        { "create": "Case", "record": { "Subject": "{tag} first" }, "as": "k1" },
+        { "create": "Case", "record": { "Subject": "{tag} second" }, "as": "k2" },
+        { "retrieve": "Case", "id": "{k1}", "save": { "n1": "CaseNumber" } },
+        { "retrieve": "Case", "id": "{k2}", "record": { "CaseNumber": { "$gt": "{n1}" } } }
+      ]
+    },
+    {
+      "name": "Opportunity/the stage sets IsClosed, IsWon, Probability and the forecast category",
+      "steps": [
+        { "create": "Opportunity", "record": { "Name": "{tag} won", "StageName": "Closed Won", "CloseDate": "{date:0}" }, "as": "o" },
+        { "retrieve": "Opportunity", "id": "{o}", "record": { "IsClosed": true, "IsWon": true, "Probability": 100, "ForecastCategoryName": "Closed" } },
+        { "update": "Opportunity", "id": "{o}", "record": { "StageName": "Negotiation/Review" } },
+        { "retrieve": "Opportunity", "id": "{o}", "record": { "IsClosed": false, "IsWon": false, "Probability": 90, "ForecastCategoryName": "Pipeline" } },
+        { "update": "Opportunity", "id": "{o}", "record": { "StageName": "Closed Lost" } },
+        { "retrieve": "Opportunity", "id": "{o}", "record": { "IsClosed": true, "IsWon": false, "Probability": 0 } },
+        { "describe": "Opportunity", "fields": { "IsClosed": { "createable": false, "updateable": false }, "IsWon": { "createable": false, "updateable": false } } }
+      ]
+    },
+    {
+      "name": "Opportunity/a probability given with the stage wins",
+      "steps": [
+        { "create": "Opportunity", "record": { "Name": "{tag} hopeful", "StageName": "Prospecting", "CloseDate": "{date:0}", "Probability": 35 }, "as": "o" },
+        { "retrieve": "Opportunity", "id": "{o}", "record": { "Probability": 35 } },
+        { "update": "Opportunity", "id": "{o}", "record": { "Amount": 10 } },
+        { "retrieve": "Opportunity", "id": "{o}", "record": { "Probability": 35 } },
+        { "query": "SELECT COUNT() FROM Opportunity WHERE Id = '{o}' AND IsClosed = false", "total": 1 }
+      ]
+    },
+    {
+      "name": "Opportunity/IsClosed can't be set",
+      "steps": [
+        {
+          "create": "Opportunity",
+          "record": { "Name": "{tag} x", "StageName": "Prospecting", "CloseDate": "{date:0}", "IsClosed": true },
+          "error": { "code": "INVALID_FIELD_FOR_INSERT_UPDATE", "fields": ["IsClosed"] }
+        }
+      ]
+    },
+    {
+      "name": "Case/closing a case sets IsClosed and ClosedDate",
+      "steps": [
+        { "create": "Case", "record": { "Subject": "{tag} open" }, "as": "k" },
+        { "retrieve": "Case", "id": "{k}", "record": { "Status": "New", "IsClosed": false, "ClosedDate": null } },
+        { "update": "Case", "id": "{k}", "record": { "Status": "Closed" } },
+        { "retrieve": "Case", "id": "{k}", "record": { "IsClosed": true, "ClosedDate": "$recent" } }
+      ]
+    },
+    {
+      "name": "price books/the standard price book",
+      "steps": [{ "query": "SELECT Id, IsStandard FROM Pricebook2 WHERE IsStandard = true", "records": [{ "Id": "$id", "IsStandard": true }] }]
+    },
+    {
+      "name": "price books/a custom price needs a standard price first",
+      "steps": [
+        { "query": "SELECT Id FROM Pricebook2 WHERE IsStandard = true", "save": { "std": "Id" } },
+        { "create": "Product2", "record": { "Name": "{tag} Widget", "ProductCode": "{tag}-W", "IsActive": true }, "as": "prod" },
+        { "create": "Pricebook2", "record": { "Name": "{tag} Partner Prices", "IsActive": true }, "as": "book" },
+        {
+          "create": "PricebookEntry",
+          "record": { "Pricebook2Id": "{book}", "Product2Id": "{prod}", "UnitPrice": 8, "IsActive": true },
+          "error": "STANDARD_PRICE_NOT_DEFINED"
+        },
+        { "create": "PricebookEntry", "record": { "Pricebook2Id": "{std}", "Product2Id": "{prod}", "UnitPrice": 10, "IsActive": true }, "as": "std_entry" },
+        { "create": "PricebookEntry", "record": { "Pricebook2Id": "{book}", "Product2Id": "{prod}", "UnitPrice": 8, "IsActive": true }, "as": "entry" },
+        {
+          "query": "SELECT Name, ProductCode, UnitPrice, Pricebook2.Name FROM PricebookEntry WHERE Product2Id = '{prod}' ORDER BY UnitPrice",
+          "records": [
+            { "Name": "{tag} Widget", "ProductCode": "{tag}-W", "UnitPrice": 8, "Pricebook2": { "Name": "{tag} Partner Prices" } },
+            { "Name": "{tag} Widget", "ProductCode": "{tag}-W", "UnitPrice": 10, "Pricebook2": { "Name": "$notnull" } }
+          ]
+        },
+        {
+          "query": "SELECT Name, (SELECT UnitPrice FROM PricebookEntries ORDER BY UnitPrice) FROM Product2 WHERE Id = '{prod}'",
+          "records": [{ "Name": "{tag} Widget", "PricebookEntries": [{ "UnitPrice": 8 }, { "UnitPrice": 10 }] }]
+        }
+      ]
+    },
+    {
+      "name": "price books/one price per product per price book",
+      "steps": [
+        { "query": "SELECT Id FROM Pricebook2 WHERE IsStandard = true", "save": { "std": "Id" } },
+        { "create": "Product2", "record": { "Name": "{tag} Gadget" }, "as": "prod" },
+        { "create": "PricebookEntry", "record": { "Pricebook2Id": "{std}", "Product2Id": "{prod}", "UnitPrice": 5 } },
+        { "create": "PricebookEntry", "record": { "Pricebook2Id": "{std}", "Product2Id": "{prod}", "UnitPrice": 6 }, "error": "DUPLICATE_VALUE" }
+      ]
+    },
+    {
+      "name": "price books/an entry's price book and product can't change",
+      "steps": [
+        { "describe": "PricebookEntry", "fields": { "Pricebook2Id": { "createable": true, "updateable": false }, "Product2Id": { "createable": true, "updateable": false } } },
+        { "describe": "Pricebook2", "fields": { "IsStandard": { "createable": false, "updateable": false } } }
+      ]
+    },
+    {
+      "name": "Contact/the Account's Contacts, and the Contact's Account",
+      "steps": [
+        { "create": "Account", "record": { "Name": "{tag} family", "Phone": "555-1000" }, "as": "a" },
+        {
+          "create_many": "Contact",
+          "records": [
+            { "FirstName": "Ada", "LastName": "{tag} One", "AccountId": "{a}", "Birthdate": "1990-12-10", "HasOptedOutOfEmail": true },
+            { "FirstName": "Bea", "LastName": "{tag} Two", "AccountId": "{a}" }
+          ]
+        },
+        {
+          "query": "SELECT Name, Birthdate, HasOptedOutOfEmail, Account.Phone FROM Contact WHERE AccountId = '{a}' ORDER BY Name",
+          "records": [
+            { "Name": "Ada {tag} One", "Birthdate": "1990-12-10", "HasOptedOutOfEmail": true, "Account": { "Phone": "555-1000" } },
+            { "Name": "Bea {tag} Two", "Birthdate": null, "HasOptedOutOfEmail": false, "Account": { "Phone": "555-1000" } }
+          ]
+        },
+        { "query": "SELECT COUNT() FROM Contact WHERE Account.Name = '{tag} family'", "total": 2 }
+      ]
+    }
+  ]
+}

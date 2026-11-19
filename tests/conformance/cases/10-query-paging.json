@@ -1,0 +1,117 @@
+{
+  "about": "Query results in pages: batch sizes, nextRecordsUrl, the SDKs following it, and queryAll.",
+  "setup": [
+    { "create_many": "Contact", "count": 2050, "template": { "LastName": "{tag} {i}" } }
+  ],
+  "cases": [
+    {
+      "name": "the SDK fetches every page of a large result",
+      "steps": [
+        {
+          "query": "SELECT Id, LastName FROM Contact WHERE LastName LIKE '{tag}%' ORDER BY LastName",
+          "total": 2050,
+          "records": { "$length": 2050 }
+        },
+        {
+          "query": "SELECT LastName FROM Contact WHERE LastName LIKE '{tag}%' ORDER BY LastName DESC LIMIT 3",
+          "pluck": "LastName",
+          "values": ["{tag} 2049", "{tag} 2048", "{tag} 2047"]
+        }
+      ]
+    },
+    {
+      "name": "at most 2,000 records come back in one response",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/query?q=SELECT+Id+FROM+Contact+WHERE+LastName+LIKE+%27{tag}%25%27",
+          "status": 200,
+          "response": { "totalSize": 2050, "done": false, "records": { "$length": 2000 }, "nextRecordsUrl": { "$regex": "^/services/data/v{version}/query/[a-zA-Z0-9]+-2000$" } },
+          "save": { "next": "nextRecordsUrl" }
+        },
+        {
+          "request": "GET",
+          "path": "{next}",
+          "status": 200,
+          "response": { "totalSize": 2050, "done": true, "records": { "$length": 50 }, "nextRecordsUrl": "$absent" }
+        }
+      ]
+    },
+    {
+      "name": "Sforce-Query-Options batchSize sets the page size",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/query?q=SELECT+LastName+FROM+Contact+WHERE+LastName+LIKE+%27{tag}%25%27+ORDER+BY+LastName+LIMIT+450",
+          "headers": { "Sforce-Query-Options": "batchSize=200" },
+          "status": 200,
+          "response": { "totalSize": 450, "done": false, "records": { "$length": 200 }, "nextRecordsUrl": { "$regex": "-200$" } },
+          "save": { "page2": "nextRecordsUrl", "last1": "records.199.LastName" }
+        },
+        {
+          "request": "GET",
+          "path": "{page2}",
+          "headers": { "Sforce-Query-Options": "batchSize=200" },
+          "status": 200,
+          "response": { "done": false, "records": { "$length": 200 }, "nextRecordsUrl": { "$regex": "-400$" } },
+          "save": { "page3": "nextRecordsUrl", "first2": "records.0.LastName" }
+        },
+        { "request": "GET", "path": "{page3}", "status": 200, "response": { "done": true, "records": { "$length": 50 } } },
+        { "query": "SELECT LastName FROM Contact WHERE LastName = '{last1}' OR LastName = '{first2}' ORDER BY LastName", "pluck": "LastName", "values": ["{tag} 0199", "{tag} 0200"] }
+      ]
+    },
+    {
+      "name": "the SDK follows pages of a LIMIT",
+      "steps": [
+        { "query": "SELECT Id FROM Contact WHERE LastName LIKE '{tag}%' LIMIT 2010", "total": 2010, "records": { "$length": 2010 } }
+      ]
+    },
+    {
+      "name": "an unknown query locator is INVALID_QUERY_LOCATOR",
+      "steps": [{ "request": "GET", "path": "/query/01gZZZZZZZZZZZZZZZ-2000", "status": 400, "error": "INVALID_QUERY_LOCATOR" }]
+    },
+    {
+      "name": "a query locator can be read more than once",
+      "steps": [
+        {
+          "request": "GET",
+          "path": "/query?q=SELECT+LastName+FROM+Contact+WHERE+LastName+LIKE+%27{tag}%25%27+ORDER+BY+LastName",
+          "headers": { "Sforce-Query-Options": "batchSize=200" },
+          "status": 200,
+          "response": { "totalSize": 2050, "done": false, "records": { "$length": 200 } },
+          "save": { "next": "nextRecordsUrl" }
+        },
+        {
+          "request": "GET",
+          "path": "{next}",
+          "headers": { "Sforce-Query-Options": "batchSize=200" },
+          "status": 200,
+          "response": { "done": false, "records": { "$contains": [{ "LastName": "{tag} 0200" }] } }
+        },
+        {
+          "request": "GET",
+          "path": "{next}",
+          "headers": { "Sforce-Query-Options": "batchSize=200" },
+          "status": 200,
+          "response": { "done": false, "records": { "$contains": [{ "LastName": "{tag} 0200" }] } }
+        }
+      ]
+    },
+    {
+      "name": "queryAll includes deleted records; query doesn't",
+      "steps": [
+        { "query": "SELECT Id FROM Contact WHERE LastName IN ('{tag} 0001', '{tag} 0002')", "save": { "gone": "Id" } },
+        { "delete": "Contact", "id": "{gone}" },
+        { "query": "SELECT Id FROM Contact WHERE LastName LIKE '{tag}%'", "total": 2049 },
+        { "query": "SELECT Id FROM Contact WHERE LastName LIKE '{tag}%'", "all": true, "total": 2050, "records": { "$length": 2050 } },
+        { "query": "SELECT Id, IsDeleted FROM Contact WHERE LastName LIKE '{tag}%' AND IsDeleted = true", "all": true, "records": [{ "Id": "{gone}", "IsDeleted": true }] },
+        {
+          "request": "GET",
+          "path": "/queryAll?q=SELECT+Id+FROM+Contact+WHERE+Id+%3D+%27{gone}%27",
+          "status": 200,
+          "response": { "totalSize": 1 }
+        }
+      ]
+    }
+  ]
+}

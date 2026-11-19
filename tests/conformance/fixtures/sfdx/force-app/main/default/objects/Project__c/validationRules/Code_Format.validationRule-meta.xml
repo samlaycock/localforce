@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Code_Format</fullName>
+    <active>true</active>
+    <description>PRJ codes are PRJ, a dash and at least three digits.</description>
+    <errorConditionFormula>BEGINS(UPPER(Code__c), "PRJ") &amp;&amp; NOT(REGEX(Code__c, "PRJ-[0-9]{3,}"))</errorConditionFormula>
+    <errorDisplayField>Code__c</errorDisplayField>
+    <errorMessage>PRJ codes look like PRJ-123.</errorMessage>
+</ValidationRule>

@@ -1,0 +1,331 @@
+{
+  "about": "SOQL: selecting fields, filtering with SOQL's own null and case rules, ordering, LIMIT and OFFSET, FIELDS(), and query errors.",
+  "setup": [
+    {
+      "create_many": "Account",
+      "records": [
+        { "Name": "{tag} Alpha", "Industry": "Technology", "Tier__c": "Gold", "Regions__c": "EMEA;APAC", "AnnualRevenue": 1000000, "NumberOfEmployees": 50 },
+        { "Name": "{tag} beta", "Industry": "Retail", "Tier__c": "Silver", "Regions__c": "AMER", "AnnualRevenue": 250000, "NumberOfEmployees": 10, "Phone": "555-0100" },
+        { "Name": "{tag} Gamma", "NumberOfEmployees": 500 },
+        { "Name": "{tag} delta_100%", "Industry": "Technology", "Tier__c": "Bronze", "Regions__c": "EMEA", "AnnualRevenue": 5000 },
+        { "Name": "O'Brien {tag}", "Industry": "Back\\slash" }
+      ],
+      "as": ["alpha", "beta", "gamma", "delta", "obrien"]
+    },
+    {
+      "create_many": "Project__c",
+      "records": [
+        { "Name": "{tag} active", "Is_Active__c": true, "Budget__c": 99.99 },
+        { "Name": "{tag} inactive", "Is_Active__c": false, "Budget__c": 100 }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "select/only the selected fields, plus attributes",
+      "steps": [
+        {
+          "query": "SELECT Name, Industry FROM Account WHERE Id = '{alpha}'",
+          "total": 1,
+          "records": [
+            {
+              "attributes": { "type": "Account", "url": "/services/data/v{version}/sobjects/Account/{alpha}" },
+              "Name": "{tag} Alpha",
+              "Industry": "Technology"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "select/keywords and names ignore case, results use API names",
+      "steps": [{ "query": "select name, INDUSTRY from account where id = '{alpha}'", "records": [{ "Name": "{tag} Alpha", "Industry": "Technology" }] }]
+    },
+    {
+      "name": "select/values come back with their types, and nulls as null",
+      "steps": [
+        {
+          "query": "SELECT AnnualRevenue, NumberOfEmployees, Tier__c, Regions__c, Phone FROM Account WHERE Id = '{alpha}'",
+          "records": [{ "AnnualRevenue": 1000000, "NumberOfEmployees": 50, "Tier__c": "Gold", "Regions__c": "EMEA;APAC", "Phone": null }]
+        }
+      ]
+    },
+    {
+      "name": "select/the same field twice is an error",
+      "steps": [{ "query": "SELECT Name, Id, name FROM Account", "error": { "code": ["MALFORMED_QUERY", "INVALID_FIELD"], "message": "duplicate field selected" } }]
+    },
+    {
+      "name": "select/FIELDS(STANDARD) selects the standard fields",
+      "steps": [
+        {
+          "query": "SELECT FIELDS(STANDARD) FROM Account WHERE Id = '{alpha}' LIMIT 1",
+          "pluck": "Name",
+          "values": ["{tag} Alpha"]
+        },
+        {
+          "request": "GET",
+          "path": "/query?q=SELECT+FIELDS(STANDARD)+FROM+Account+WHERE+Id+%3D+%27{alpha}%27",
+          "status": 200,
+          "response": { "records": [{ "Industry": "Technology", "OwnerId": "{user}", "CreatedDate": "$datetime", "Tier__c": "$absent" }] }
+        }
+      ]
+    },
+    {
+      "name": "select/FIELDS(ALL) and FIELDS(CUSTOM) need a LIMIT of at most 200",
+      "steps": [
+        { "query": "SELECT FIELDS(ALL) FROM Account", "error": "MALFORMED_QUERY" },
+        { "query": "SELECT FIELDS(CUSTOM) FROM Account LIMIT 201", "error": "MALFORMED_QUERY" },
+        {
+          "request": "GET",
+          "path": "/query?q=SELECT+FIELDS(ALL)+FROM+Account+WHERE+Id+%3D+%27{alpha}%27+LIMIT+1",
+          "status": 200,
+          "response": { "records": [{ "Name": "{tag} Alpha", "Tier__c": "Gold", "Industry": "Technology" }] }
+        },
+        {
+          "request": "GET",
+          "path": "/query?q=SELECT+FIELDS(CUSTOM)+FROM+Account+WHERE+Id+%3D+%27{alpha}%27+LIMIT+1",
+          "status": 200,
+          "response": { "records": [{ "Tier__c": "Gold", "Regions__c": "EMEA;APAC", "Name": "$absent" }] }
+        }
+      ]
+    },
+    {
+      "name": "compare/= on text ignores case",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name = '{tag} ALPHA'", "pluck": "Name", "values": ["{tag} Alpha"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND Industry = 'technology' ORDER BY Name", "pluck": "Name", "values": ["{tag} Alpha", "{tag} delta_100%"] }
+      ]
+    },
+    {
+      "name": "compare/!= matches records where the field is null",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND Industry != 'Technology' ORDER BY Name", "pluck": "Name", "values": ["{tag} beta", "{tag} Gamma"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND Industry <> 'Technology' ORDER BY Name", "pluck": "Name", "values": ["{tag} beta", "{tag} Gamma"] }
+      ]
+    },
+    {
+      "name": "compare/= null and != null",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND Industry = null", "pluck": "Name", "values": ["{tag} Gamma"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND Industry != null ORDER BY Name", "pluck": "Name", "values": ["{tag} Alpha", "{tag} beta", "{tag} delta_100%"] }
+      ]
+    },
+    {
+      "name": "compare/< and > leave out nulls",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND AnnualRevenue > 100000 ORDER BY Name", "pluck": "Name", "values": ["{tag} Alpha", "{tag} beta"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND AnnualRevenue < 100000", "pluck": "Name", "values": ["{tag} delta_100%"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND NumberOfEmployees >= 50 ORDER BY Name", "pluck": "Name", "values": ["{tag} Alpha", "{tag} Gamma"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND NumberOfEmployees <= 10", "pluck": "Name", "values": ["{tag} beta"] }
+      ]
+    },
+    {
+      "name": "compare/numbers can be compared with decimals",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND AnnualRevenue > 4999.99 AND AnnualRevenue < 5000.01", "pluck": "Name", "values": ["{tag} delta_100%"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Budget__c < 100", "pluck": "Name", "values": ["{tag} active"] }
+      ]
+    },
+    {
+      "name": "compare/booleans",
+      "steps": [
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Is_Active__c = true", "pluck": "Name", "values": ["{tag} active"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Is_Active__c = FALSE", "pluck": "Name", "values": ["{tag} inactive"] },
+        { "query": "SELECT Name FROM Project__c WHERE Name LIKE '{tag}%' AND Is_Active__c != true", "pluck": "Name", "values": ["{tag} inactive"] }
+      ]
+    },
+    {
+      "name": "compare/IN and NOT IN (which includes nulls)",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND Industry IN ('Retail', 'Technology') ORDER BY Name", "pluck": "Name", "values": ["{tag} Alpha", "{tag} beta", "{tag} delta_100%"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND Industry NOT IN ('Retail') ORDER BY Name", "pluck": "Name", "values": ["{tag} Alpha", "{tag} delta_100%", "{tag} Gamma"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND NumberOfEmployees IN (10, 500) ORDER BY Name", "pluck": "Name", "values": ["{tag} beta", "{tag} Gamma"] }
+      ]
+    },
+    {
+      "name": "compare/Id accepts 15- and 18-character ids",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Id = '{beta:15}'", "pluck": "Name", "values": ["{tag} beta"] },
+        { "query": "SELECT Name FROM Account WHERE Id IN ('{alpha}', '{gamma:15}') ORDER BY Name", "pluck": "Name", "values": ["{tag} Alpha", "{tag} Gamma"] }
+      ]
+    },
+    {
+      "name": "compare/a reference field against an id",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND OwnerId = '{user}' AND Industry = 'Retail'", "pluck": "Name", "values": ["{tag} beta"] }
+      ]
+    },
+    {
+      "name": "logic/AND, OR, NOT and parentheses",
+      "steps": [
+        {
+          "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND (Industry = 'Technology' AND (Tier__c = 'Gold' OR Tier__c = 'Bronze')) ORDER BY Name",
+          "pluck": "Name",
+          "values": ["{tag} Alpha", "{tag} delta_100%"]
+        },
+        {
+          "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND ((Industry = 'Retail' OR NumberOfEmployees > 100) AND Phone != null)",
+          "pluck": "Name",
+          "values": ["{tag} beta"]
+        },
+        {
+          "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND (NOT (Tier__c = 'Gold' OR Tier__c = 'Silver')) AND Tier__c != null",
+          "pluck": "Name",
+          "values": ["{tag} delta_100%"]
+        }
+      ]
+    },
+    {
+      "name": "logic/mixing AND and OR without parentheses is MALFORMED_QUERY",
+      "steps": [{ "query": "SELECT Id FROM Account WHERE Name = 'a' AND Name = 'b' OR Name = 'c'", "error": "MALFORMED_QUERY" }]
+    },
+    {
+      "name": "like/% and _ wildcards, ignoring case",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%eta'", "pluck": "Name", "values": ["{tag} beta"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%ALPHA'", "pluck": "Name", "values": ["{tag} Alpha"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag} _amma'", "pluck": "Name", "values": ["{tag} Gamma"] }
+      ]
+    },
+    {
+      "name": "like/escaped wildcards match literally",
+      "steps": [{ "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%\\_100\\%'", "pluck": "Name", "values": ["{tag} delta_100%"] }]
+    },
+    {
+      "name": "like/NOT with LIKE",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND (NOT Name LIKE '%a') ORDER BY Name", "pluck": "Name", "values": ["{tag} delta_100%"] }
+      ]
+    },
+    {
+      "name": "strings/escaped quotes and backslashes",
+      "steps": [
+        { "query": "SELECT Name, Industry FROM Account WHERE Name = 'O\\'Brien {tag}'", "records": [{ "Name": "O'Brien {tag}", "Industry": "Back\\slash" }] },
+        { "query": "SELECT Name FROM Account WHERE Industry = 'Back\\\\slash' AND Name LIKE '%{tag}'", "pluck": "Name", "values": ["O'Brien {tag}"] }
+      ]
+    },
+    {
+      "name": "multi-select/INCLUDES matches any of the values; a;b means both",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND Regions__c INCLUDES ('EMEA') ORDER BY Name", "pluck": "Name", "values": ["{tag} Alpha", "{tag} delta_100%"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND Regions__c INCLUDES ('APAC;EMEA')", "pluck": "Name", "values": ["{tag} Alpha"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND Regions__c INCLUDES ('AMER', 'APAC') ORDER BY Name", "pluck": "Name", "values": ["{tag} Alpha", "{tag} beta"] }
+      ]
+    },
+    {
+      "name": "multi-select/EXCLUDES",
+      "steps": [
+        {
+          "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND Regions__c EXCLUDES ('EMEA')",
+          "pluck": "Name",
+          "contains": ["{tag} beta"],
+          "excludes": ["{tag} Alpha", "{tag} delta_100%"]
+        }
+      ]
+    },
+    {
+      "name": "multi-select/= matches the exact set of values",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' AND Regions__c = 'EMEA'", "pluck": "Name", "values": ["{tag} delta_100%"] }
+      ]
+    },
+    {
+      "name": "order/text sorts ignoring case",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' ORDER BY Name", "pluck": "Name", "values": ["{tag} Alpha", "{tag} beta", "{tag} delta_100%", "{tag} Gamma"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' ORDER BY Name DESC", "pluck": "Name", "values": ["{tag} Gamma", "{tag} delta_100%", "{tag} beta", "{tag} Alpha"] }
+      ]
+    },
+    {
+      "name": "order/nulls first by default, and NULLS FIRST / LAST",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' ORDER BY AnnualRevenue", "pluck": "Name", "values": ["{tag} Gamma", "{tag} delta_100%", "{tag} beta", "{tag} Alpha"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' ORDER BY AnnualRevenue ASC NULLS LAST", "pluck": "Name", "values": ["{tag} delta_100%", "{tag} beta", "{tag} Alpha", "{tag} Gamma"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' ORDER BY AnnualRevenue DESC NULLS LAST", "pluck": "Name", "values": ["{tag} Alpha", "{tag} beta", "{tag} delta_100%", "{tag} Gamma"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' ORDER BY AnnualRevenue DESC NULLS FIRST", "pluck": "Name", "values": ["{tag} Gamma", "{tag} Alpha", "{tag} beta", "{tag} delta_100%"] }
+      ]
+    },
+    {
+      "name": "order/several sort keys",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' ORDER BY Industry NULLS LAST, Name DESC", "pluck": "Name", "values": ["{tag} beta", "{tag} delta_100%", "{tag} Alpha", "{tag} Gamma"] }
+      ]
+    },
+    {
+      "name": "order/by a field that isn't selected",
+      "steps": [
+        { "query": "SELECT Id FROM Account WHERE Name LIKE '{tag}%' ORDER BY NumberOfEmployees DESC NULLS LAST, Name", "pluck": "Id", "values": ["{gamma}", "{alpha}", "{beta}", "{delta}"] }
+      ]
+    },
+    {
+      "name": "limit/LIMIT and OFFSET",
+      "steps": [
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' ORDER BY Name LIMIT 2", "pluck": "Name", "values": ["{tag} Alpha", "{tag} beta"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' ORDER BY Name LIMIT 2 OFFSET 1", "pluck": "Name", "values": ["{tag} beta", "{tag} delta_100%"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' ORDER BY Name LIMIT 10 OFFSET 3", "pluck": "Name", "values": ["{tag} Gamma"] },
+        { "query": "SELECT Name FROM Account WHERE Name LIKE '{tag}%' ORDER BY Name LIMIT 10 OFFSET 10", "records": [] }
+      ]
+    },
+    {
+      "name": "limit/OFFSET is at most 2000",
+      "steps": [{ "query": "SELECT Id FROM Account LIMIT 1 OFFSET 2001", "error": "NUMBER_OUTSIDE_VALID_RANGE" }]
+    },
+    {
+      "name": "count/COUNT() returns only the number of records",
+      "steps": [
+        { "query": "SELECT COUNT() FROM Account WHERE Name LIKE '{tag}%'", "total": 4, "records": [] },
+        { "query": "SELECT COUNT() FROM Account WHERE Name LIKE '{tag}%' AND Industry = null", "total": 1, "records": [] }
+      ]
+    },
+    {
+      "name": "errors/syntax errors are MALFORMED_QUERY",
+      "steps": [
+        { "query": "SELECT FROM Account", "error": "MALFORMED_QUERY" },
+        { "query": "SELECT Id FROM Account WHERE", "error": "MALFORMED_QUERY" },
+        { "query": "SELECT Id FROM Account WHERE Name = 'unterminated", "error": "MALFORMED_QUERY" },
+        { "query": "SELECT Id, FROM Account", "error": "MALFORMED_QUERY" },
+        { "query": "SELECT Id FROM Account ORDER BY", "error": "MALFORMED_QUERY" },
+        { "query": "SELECT Id FROM Account LIMIT many", "error": "MALFORMED_QUERY" }
+      ]
+    },
+    {
+      "name": "errors/unknown fields are INVALID_FIELD, with the row and column",
+      "steps": [
+        { "query": "SELECT Id, Nmae FROM Account", "error": { "code": "INVALID_FIELD", "message": "No such column 'Nmae' on entity 'Account'" } },
+        { "query": "SELECT Id, Nmae FROM Account", "error": { "code": "INVALID_FIELD", "message": "ERROR at Row:1:Column:12" } },
+        { "query": "SELECT Id FROM Account WHERE Nmae = 'x'", "error": { "code": "INVALID_FIELD", "message": "No such column 'Nmae'" } },
+        { "query": "SELECT Id FROM Account ORDER BY Nmae", "error": ["INVALID_FIELD", "MALFORMED_QUERY"] }
+      ]
+    },
+    {
+      "name": "errors/unknown objects are INVALID_TYPE",
+      "steps": [{ "query": "SELECT Id FROM Acount", "error": { "code": "INVALID_TYPE", "message": "sObject type 'Acount' is not supported" } }]
+    },
+    {
+      "name": "errors/filter values must match the field's type",
+      "steps": [
+        { "query": "SELECT Id FROM Account WHERE AnnualRevenue = 'lots'", "error": "INVALID_QUERY_FILTER_OPERATOR" },
+        { "query": "SELECT Id FROM Account WHERE Name = 5", "error": "INVALID_QUERY_FILTER_OPERATOR" },
+        { "query": "SELECT Id FROM Project__c WHERE Start_Date__c = '2026-01-01'", "error": "INVALID_QUERY_FILTER_OPERATOR" },
+        { "query": "SELECT Id FROM Project__c WHERE Is_Active__c = 'true'", "error": "INVALID_QUERY_FILTER_OPERATOR" }
+      ]
+    },
+    {
+      "name": "errors/invalid ids in filters",
+      "steps": [{ "query": "SELECT Id FROM Account WHERE Id = 'abc'", "error": { "code": "INVALID_QUERY_FILTER_OPERATOR", "message": "invalid ID field: abc" } }]
+    },
+    {
+      "name": "errors/INCLUDES only works on multi-select picklists",
+      "steps": [{ "query": "SELECT Id FROM Account WHERE Name INCLUDES ('x')", "error": "INVALID_QUERY_FILTER_OPERATOR" }]
+    },
+    {
+      "name": "errors/a long text area can't be filtered or sorted on",
+      "steps": [
+        { "query": "SELECT Id FROM Project__c WHERE Notes__c = 'x'", "error": ["INVALID_FIELD", "MALFORMED_QUERY"] },
+        { "query": "SELECT Id FROM Project__c WHERE Notes__c IN ('x')", "error": ["INVALID_FIELD", "MALFORMED_QUERY"] },
+        { "query": "SELECT Id FROM Project__c ORDER BY Notes__c", "error": ["INVALID_FIELD", "MALFORMED_QUERY"] },
+        { "query": "SELECT Id FROM Account WHERE Description LIKE '%x%'", "error": ["INVALID_FIELD", "MALFORMED_QUERY"] }
+      ]
+    }
+  ]
+}
