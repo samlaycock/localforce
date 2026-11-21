@@ -20,6 +20,12 @@ pub struct Cli {
     /// Keep the org in this directory instead of in memory.
     #[arg(long, env = "LOCALFORCE_DATA_DIR")]
     pub data_dir: Option<PathBuf>,
+    /// Load Salesforce record tree JSON files in order, once per org.
+    #[arg(long, env = "LOCALFORCE_SEED", value_delimiter = ',')]
+    pub seed: Vec<PathBuf>,
+    /// Start from a Localforce database backup (requires a fresh org).
+    #[arg(long, env = "LOCALFORCE_RESTORE")]
+    pub restore: Option<PathBuf>,
     /// Config file with users, custom objects and custom fields.
     #[arg(long, env = "LOCALFORCE_CONFIG", default_value = "localforce.toml")]
     pub config: PathBuf,
@@ -59,6 +65,8 @@ pub struct Config {
     pub tls_port: u16,
     pub data_dir: Option<PathBuf>,
     pub strict_sessions: bool,
+    pub seed: Vec<PathBuf>,
+    pub restore: Option<PathBuf>,
     pub metadata: Vec<PathBuf>,
     /// Where the HTTPS certificate is kept.
     pub cert_dir: PathBuf,
@@ -92,6 +100,8 @@ impl Config {
             tls_port: cli.tls_port,
             data_dir: cli.data_dir.clone(),
             strict_sessions: cli.strict_sessions,
+            seed: cli.seed,
+            restore: cli.restore,
             metadata: {
                 let base = cli.config.parent().map(|p| p.to_path_buf()).unwrap_or_default();
                 let mut dirs: Vec<PathBuf> = file.metadata.iter().map(|d| base.join(d)).collect();
@@ -123,6 +133,8 @@ impl Config {
             tls_port: 0,
             data_dir: None,
             strict_sessions: false,
+            seed: vec![],
+            restore: None,
             metadata: vec![],
             cert_dir: std::env::temp_dir().join("localforce"),
             users,

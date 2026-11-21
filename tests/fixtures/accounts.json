@@ -1,0 +1,16 @@
+{
+  "records": [
+    {
+      "attributes": { "type": "Account", "referenceId": "Acme" },
+      "Name": "Acme",
+      "Contacts": {
+        "records": [
+          {
+            "attributes": { "type": "Contact", "referenceId": "Ada" },
+            "LastName": "Lovelace"
+          }
+        ]
+      }
+    }
+  ]
+}

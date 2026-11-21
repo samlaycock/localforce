@@ -42,6 +42,7 @@ a sibling of [localoidc](https://github.com/samlaycock/localoidc),
 
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [Test fixtures, backup and restore](#test-fixtures-backup-and-restore)
 - [Connecting an app](#connecting-an-app)
 - [The web UI](#the-web-ui)
 - [Defining custom objects and fields](#defining-custom-objects-and-fields)
@@ -104,6 +105,57 @@ docker run --rm -p 9600:9600 -p 9643:9643 -v localforce:/data \
   -e LOCALFORCE_CONFIG=/project/localforce.toml \
   ghcr.io/samlaycock/localforce
 ```
+
+## Test fixtures, backup and restore
+
+Start an in-memory org with an account and its related contact using the
+[included record tree](tests/fixtures/accounts.json).
+
+```sh
+localforce --seed tests/fixtures/accounts.json
+```
+
+Pass Salesforce record tree JSON files in dependency order. Each file has a
+top-level `records` array. Give every record an `attributes.type` and a unique
+`attributes.referenceId`. Nest children under their relationship name, or use
+`@referenceId` in a lookup field to refer to a record loaded earlier. For
+example, a second file can use `"AccountId": "@Acme"` to add another contact.
+
+```sh
+localforce --metadata ./force-app --seed fixtures/accounts.json --seed fixtures/contacts.json
+```
+
+The org is ready to serve requests only after every file passes the usual
+record validation. A failure exits with an error and rolls back the whole
+import. With `--data-dir`, the first successful import marks the org as
+seeded. Later starts skip the seed files. To test a changed fixture, start an
+in-memory org or use a fresh data directory. For CSV ingestion into a running
+org, use the Bulk API.
+
+To capture a baseline after setup through any client or the UI, download the
+running org's database from a second shell.
+
+```sh
+curl --fail --silent --show-error http://localhost:9600/__localforce/api/backup -o baseline.db
+```
+
+Then start each CI job from an independent copy.
+
+```sh
+localforce --restore baseline.db
+```
+
+The snapshot includes record IDs, lookup relationships, audit fields, recycle
+bin contents, ID and auto-number counters, and schema created in the UI. Supply
+the same `--config` and `--metadata` inputs to restore file-defined schema and
+login settings. Each process starts with fresh sessions, query cursors, request
+logs and Bulk API jobs.
+
+To keep the restored org between restarts, add `--data-dir ./test-org` on the
+first start. Restore requires a directory with no existing `org.db`. On
+subsequent starts use `localforce --data-dir ./test-org`. In Docker, mount
+the backup read-only, set `LOCALFORCE_RESTORE` to its container path, and use
+a fresh `/data` volume for each independent run.
 
 ## Connecting an app
 
@@ -237,6 +289,8 @@ objects and custom fields come from `localforce.toml` (see
 | `--port` | `LOCALFORCE_PORT` | `9600` | HTTP: the APIs, OAuth and the web UI |
 | `--tls-port` | `LOCALFORCE_TLS_PORT` | `9643` | HTTPS, with a generated certificate |
 | `--data-dir` | `LOCALFORCE_DATA_DIR` | none (in memory) | Where the org is kept between restarts |
+| `--seed` | `LOCALFORCE_SEED` | none | Record tree JSON files, comma-separated or repeated, loaded once per org |
+| `--restore` | `LOCALFORCE_RESTORE` | none | SQLite backup to use as the initial org |
 | `--config` | `LOCALFORCE_CONFIG` | `localforce.toml` | Users, custom objects and custom fields |
 | `--metadata` | `LOCALFORCE_METADATA` | none | SFDX project or metadata folders, comma-separated or repeated |
 | `--strict-sessions` | `LOCALFORCE_STRICT_SESSIONS` | off | Reject access tokens localforce didn't issue |

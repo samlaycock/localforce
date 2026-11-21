@@ -49,6 +49,7 @@ pub fn router() -> Router<AppState> {
         .route("/query", post(query))
         .route("/requests", get(requests).delete(clear_requests))
         .route("/requests/{id}", get(request))
+        .route("/backup", get(backup))
         .route("/reset", post(reset))
         .layer(middleware::from_fn(same_origin));
     Router::new()
@@ -503,6 +504,25 @@ async fn request(State(st): State<AppState>, Path(id): Path<u64>) -> Response {
 async fn clear_requests(State(st): State<AppState>) -> StatusCode {
     st.inspector.clear();
     StatusCode::NO_CONTENT
+}
+
+async fn backup(State(st): State<AppState>) -> Response {
+    let result = tokio::task::spawn_blocking(move || crate::data::backup(&st.db.lock().unwrap())).await;
+    match result.map_err(anyhow::Error::from).and_then(|r| r) {
+        Ok(file) => {
+            let stream = tokio_util::io::ReaderStream::new(tokio::fs::File::from_std(file));
+            (
+                [
+                    (header::CONTENT_TYPE, "application/octet-stream"),
+                    (header::CONTENT_DISPOSITION, "attachment; filename=localforce.db"),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                axum::body::Body::from_stream(stream),
+            )
+                .into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
 }
 
 async fn reset(State(st): State<AppState>) -> Response {

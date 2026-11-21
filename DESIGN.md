@@ -210,8 +210,9 @@ The sibling projects established this pattern:
 - **Fault injection**: `UNABLE_TO_LOCK_ROW`, `REQUEST_LIMIT_EXCEEDED`,
   `INVALID_SESSION_ID`, 503s and slow responses.
 - **A shifted clock**, which makes date literals and token expiry testable.
-- **Seed data and reset**: `POST /dev/api/reset`, plus loading `sf data tree`
-  JSON files at startup.
+- **Seed data and reset**. Load record tree JSON with `--seed`, reset with
+  `POST /__localforce/api/reset`, or capture a database with
+  `GET /__localforce/api/backup` and start a fresh org with `--restore`.
 - **Multiple orgs** on `<org>.localhost`.
 
 ## Suggested roadmap

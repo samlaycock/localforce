@@ -816,91 +816,15 @@ fn tree(conn: &Connection, ctx: &Ctx, req: &Req, obj: &str) -> SfResult<Resp> {
         return Err(SfError::new("LIMIT_EXCEEDED", "Too many records: a tree request can create at most 200"));
     }
 
-    struct Tree<'r> {
-        conn: &'r Connection,
-        cat: &'r Catalog,
-        ctx: &'r Ctx,
-        results: Vec<Value>,
-        seen: std::collections::HashSet<String>,
-    }
-    impl Tree<'_> {
-        /// Insert a record and its children; on failure, the reference and why.
-        fn insert(
-            &mut self,
-            rec: &Value,
-            o: &SObject,
-            parent: Option<(&str, &str)>,
-            depth: usize,
-        ) -> Result<(), Value> {
-            let fail = |r: &str, e: SfError| json!({ "referenceId": r, "errors": [e.save_result_json()] });
-            let rec = rec.as_object().cloned().unwrap_or_default();
-            let attrs = rec.get("attributes").cloned().unwrap_or(Value::Null);
-            let reference = attrs.get("referenceId").and_then(Value::as_str).unwrap_or_default().to_string();
-            if reference.is_empty() {
-                return Err(fail(
-                    "",
-                    SfError::new("INVALID_INPUT", "Include a reference ID for each record in the request."),
-                ));
-            }
-            if !self.seen.insert(reference.clone()) {
-                return Err(fail(
-                    &reference,
-                    SfError::new(
-                        "INVALID_INPUT",
-                        format!("Duplicate ReferenceId provided in the request: {reference}"),
-                    ),
-                ));
-            }
-            let ty = attrs.get("type").and_then(Value::as_str).unwrap_or_default();
-            if !ty.eq_ignore_ascii_case(&o.name) {
-                return Err(fail(
-                    &reference,
-                    SfError::new("INVALID_INPUT", format!("The type of record {reference} must be {}", o.name)),
-                ));
-            }
-            if depth > 5 {
-                return Err(fail(&reference, SfError::new("INVALID_INPUT", "A tree can be at most 5 levels deep")));
-            }
-            let mut fields = Map::new();
-            let mut children = vec![];
-            for (k, v) in rec {
-                if k == "attributes" {
-                    continue;
-                }
-                match (v.get("records").and_then(Value::as_array), self.cat.child_relationship(&o.name, &k)) {
-                    (Some(recs), Some(rel)) => children.push((rel.clone(), recs.clone())),
-                    (Some(_), None) => {
-                        return Err(fail(
-                            &reference,
-                            SfError::new("INVALID_FIELD", format!("No such child relationship '{k}' on {}", o.name)),
-                        ));
-                    }
-                    _ => {
-                        fields.insert(k, v);
-                    }
-                }
-            }
-            if let Some((fk, id)) = parent {
-                fields.insert(fk.to_string(), json!(id));
-            }
-            let id = store::insert(self.conn, self.cat, self.ctx, o, &fields).map_err(|e| fail(&reference, e))?;
-            self.results.push(json!({ "referenceId": reference, "id": id }));
-            for (rel, recs) in children {
-                let child = self.cat.object(&rel.child_object).unwrap();
-                for r in &recs {
-                    self.insert(r, child, Some((&rel.field, &id)), depth + 1)?;
-                }
-            }
-            Ok(())
-        }
-    }
-    let mut t = Tree { conn, cat, ctx, results: vec![], seen: Default::default() };
+    let mut t = crate::tree::Tree::new(conn, cat, ctx);
     for r in records {
         if let Err(e) = t.insert(r, o, None, 1) {
             return Ok(Resp::status(StatusCode::BAD_REQUEST, json!({ "hasErrors": true, "results": [e] })));
         }
     }
-    Ok(Resp::status(StatusCode::CREATED, json!({ "hasErrors": false, "results": t.results })))
+    let results: Vec<_> =
+        t.ids.into_iter().map(|(reference, id)| json!({ "referenceId": reference, "id": id })).collect();
+    Ok(Resp::status(StatusCode::CREATED, json!({ "hasErrors": false, "results": results })))
 }
 
 /// A subrequest URL (`v63.0/sobjects/Account` or `/services/data/v63.0/…`): its version, path and query.

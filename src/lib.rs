@@ -1,5 +1,6 @@
 pub mod bulk;
 pub mod config;
+mod data;
 pub mod describe;
 pub mod error;
 pub mod explain;
@@ -23,6 +24,7 @@ pub mod store;
 pub mod tabs;
 pub mod tls;
 pub mod tooling;
+mod tree;
 pub mod ui;
 
 pub use routes::{Scheme, router};
