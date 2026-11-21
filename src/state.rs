@@ -82,17 +82,27 @@ impl AppState {
             metadata.fields.extend(loaded.schema.fields);
             metadata.validation_rules.extend(loaded.schema.validation_rules);
         }
-        let conn = store::open(config.data_dir.as_ref().map(|d| d.join("org.db")).as_deref())?;
-        let ui_schema = crate::schema_admin::load_ui_schema(&conn)?;
-        let cat = build_catalog(&config.schema, &metadata, &ui_schema)?;
-        store::sync_tables(&conn, &cat)?;
+        let path = config.data_dir.as_ref().map(|d| d.join("org.db"));
+        let (conn, (ui_schema, cat, default_user)) =
+            crate::data::open_org(path.as_deref(), config.restore.as_deref(), |conn| {
+                let ui_schema = crate::schema_admin::load_ui_schema(conn)?;
+                let cat = build_catalog(&config.schema, &metadata, &ui_schema)?;
+                store::sync_tables(conn, &cat)?;
+                let mut user_ids = vec![];
+                for u in &config.users {
+                    user_ids.push(ensure_user(conn, &cat, u)?);
+                }
+                let default_user = user_ids[0].clone();
+                ensure_standard_price_book(conn, &cat, &default_user)?;
+                let ctx = Ctx {
+                    user_id: default_user.clone(),
+                    now: chrono::Utc::now() + chrono::Duration::seconds(config.clock_offset_secs),
+                    api_version: crate::ui::API_VERSION.into(),
+                };
+                crate::data::seed(conn, &config.seed, &cat, &ctx)?;
+                Ok((ui_schema, cat, default_user))
+            })?;
         let org_id = ids::make("00D", ORG_SEQ);
-        let mut user_ids = vec![];
-        for u in &config.users {
-            user_ids.push(ensure_user(&conn, &cat, u)?);
-        }
-        let default_user = user_ids[0].clone();
-        ensure_standard_price_book(&conn, &cat, &default_user)?;
         for problem in crate::formula::check(&cat) {
             tracing::warn!("{problem}");
         }

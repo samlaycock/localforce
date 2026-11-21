@@ -248,3 +248,116 @@ async fn ui_records_api() {
         .unwrap();
     assert_eq!(resp.status().as_u16(), 403);
 }
+
+#[tokio::test]
+async fn startup_fixtures_are_atomic_and_applied_once() {
+    let directory = tempfile::tempdir().unwrap();
+    let accounts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/accounts.json");
+    let contacts = directory.path().join("contacts.json");
+    let config = || {
+        let mut config = Config::for_tests("").unwrap();
+        config.data_dir = Some(directory.path().into());
+        config.seed = vec![accounts.clone(), contacts.clone()];
+        config
+    };
+    let contact = |parent: &str| {
+        json!({"records": [{
+            "attributes": {"type": "Contact", "referenceId": "Grace"},
+            "LastName": "@literal", "AccountId": parent
+        }]})
+    };
+    // Start with existing data, then fail in the second file.
+    let mut initial = config();
+    initial.seed.clear();
+    let org = Org::start(initial).await;
+    org.create("Account", json!({"Name":"Existing"})).await;
+    std::fs::write(&contacts, contact("@missing").to_string()).unwrap();
+    let err = AppState::new(config()).err().expect("unknown reference must fail startup");
+    let message = format!("{err:#}");
+    assert!(message.contains("contacts.json") && message.contains("@missing"), "{message}");
+    assert_eq!(org.query("SELECT Name FROM Account").await["totalSize"], 1);
+    assert_eq!(org.query("SELECT Id FROM Contact").await["totalSize"], 0);
+
+    std::fs::write(&contacts, contact("@Acme").to_string()).unwrap();
+    drop(AppState::new(config()).unwrap());
+    // The persisted marker also allows restart without the original files.
+    std::fs::remove_file(&contacts).unwrap();
+    let org = Org::start(config()).await;
+    assert_eq!(org.query("SELECT Name FROM Account").await["totalSize"], 2);
+    let contacts = org.query("SELECT LastName, Account.Name FROM Contact ORDER BY LastName").await;
+    assert_eq!(contacts["totalSize"], 2);
+    for contact in contacts["records"].as_array().unwrap() {
+        assert_eq!(contact["Account"]["Name"], "Acme");
+    }
+    assert_eq!(contacts["records"][0]["LastName"], "@literal");
+}
+
+#[tokio::test]
+async fn live_backup_restores_an_independent_org() {
+    for disk_source in [true, false] {
+        let source = tempfile::tempdir().unwrap();
+        let mut config = Config::for_tests("").unwrap();
+        config.data_dir = disk_source.then(|| source.path().into());
+        let org = Org::start(config).await;
+        let (status, body) = org
+            .dev(
+                Method::POST,
+                "/objects",
+                Some(json!({
+                    "name": "Ticket__c", "label": "Ticket", "name_field_format": "T-{000}",
+                    "fields": [{"name":"Account__c", "type":"reference", "reference_to":"Account"}]
+                })),
+            )
+            .await;
+        assert_eq!(status, 201, "{body}");
+        let account = org.create("Account", json!({"Name":"Acme"})).await;
+        let ticket = org.create("Ticket__c", json!({"Account__c":account})).await;
+        let deleted = org.create("Contact", json!({"LastName":"Deleted"})).await;
+        assert_eq!(org.rest(Method::DELETE, &format!("/sobjects/Contact/{deleted}"), None).await.0, 204);
+
+        let snapshot = source.path().join("baseline.db");
+        let response = org.http.get(format!("{}/__localforce/api/backup", org.base)).send().await.unwrap();
+        let bytes = response.error_for_status().unwrap().bytes().await.unwrap();
+        std::fs::write(&snapshot, &bytes).unwrap();
+        let next_ticket = org.create("Ticket__c", json!({})).await;
+
+        let destination = tempfile::tempdir().unwrap();
+        let config = || {
+            let mut config = Config::for_tests("").unwrap();
+            config.restore = Some(snapshot.clone());
+            config.data_dir = (!disk_source).then(|| destination.path().into());
+            config
+        };
+        let restored = Org::start(config()).await;
+        let records = restored.query("SELECT Id, Name, Account__c FROM Ticket__c").await;
+        assert_eq!(records["totalSize"], 1);
+        assert_eq!(records["records"][0]["Id"], ticket);
+        assert_eq!(records["records"][0]["Account__c"], account);
+        assert_eq!(records["records"][0]["Name"], "T-001");
+        let (s, bin) = restored.dev(Method::GET, "/records/Contact?deleted=1", None).await;
+        assert_eq!(s, 200);
+        assert_eq!(bin["records"][0]["Id"], deleted);
+        assert_eq!(restored.create("Ticket__c", json!({})).await, next_ticket);
+        assert_eq!(restored.query("SELECT Name FROM Ticket__c ORDER BY Name").await["records"][1]["Name"], "T-002");
+        assert_eq!(std::fs::read(&snapshot).unwrap(), bytes.as_ref());
+        if !disk_source {
+            assert!(AppState::new(config()).err().unwrap().to_string().contains("fresh database"));
+            let mut restart = config();
+            restart.restore = None;
+            assert_eq!(Org::start(restart).await.query("SELECT Id FROM Ticket__c").await["totalSize"], 2);
+        }
+    }
+}
+
+#[test]
+fn invalid_backup_leaves_destination_available_for_retry() {
+    let dir = tempfile::tempdir().unwrap();
+    let snapshot = dir.path().join("broken.db");
+    std::fs::write(&snapshot, b"not a database").unwrap();
+    let mut config = Config::for_tests("").unwrap();
+    config.data_dir = Some(dir.path().into());
+    config.restore = Some(snapshot.clone());
+    assert!(AppState::new(config).is_err());
+    assert!(!dir.path().join("org.db").exists());
+    assert_eq!(std::fs::read(snapshot).unwrap(), b"not a database");
+}
