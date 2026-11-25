@@ -1,45 +1,26 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>localforce</title>
-  <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="app.css">
-  <script>
-    // Apply the theme before the page renders, so it doesn't flash.
-    try {
-      document.documentElement.dataset.theme = localStorage.getItem("localforce.theme")
-        || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    } catch (_) {
-      document.documentElement.dataset.theme = "light";
-    }
-  </script>
-</head>
-<body>
-  <div id="app">
-    <header class="top">
-      <a class="brand" href="#/data"><img src="favicon.svg" alt="">localforce <span class="version" id="version"></span></a>
-      <nav class="views">
-        <a data-view="data" href="#/data">Data</a>
-        <a data-view="query" href="#/query">SOQL</a>
-        <a data-view="log" href="#/log">API log <span class="count" id="log-count" hidden></span></a>
-      </nav>
-      <div class="spacer"></div>
-      <label class="acting" title="The user records are created and edited as">
-        <span>Acting as</span>
-        <select id="user-select"></select>
-      </label>
-      <button class="btn" id="connect-btn">Connect an app</button>
-      <button class="icon-btn" id="theme-btn" title="Toggle theme" aria-label="Toggle theme"></button>
-    </header>
-    <main>
-      <section class="view data" id="view-data"></section>
-      <section class="view query" id="view-query" hidden></section>
-      <section class="view log" id="view-log" hidden></section>
-    </main>
-  </div>
-  <div class="toasts" id="toasts" aria-live="polite"></div>
-  <script src="app.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/__localforce/ui/favicon.svg" />
+    <title>localforce</title>
+    <script>
+      // Apply the saved (or the system's) theme before the first paint, so dark mode doesn't flash.
+      try {
+        const theme = localStorage.getItem("localforce.theme")
+        const dark =
+          theme === "dark" ||
+          (theme !== "light" &&
+            matchMedia("(prefers-color-scheme: dark)").matches)
+        document.documentElement.classList.add(dark ? "dark" : "light")
+      } catch {
+        // Storage can be blocked; the theme provider falls back to the system theme.
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

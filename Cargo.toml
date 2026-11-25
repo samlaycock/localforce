@@ -21,6 +21,7 @@ rcgen = "0.14.10"
 regex = "1.12"
 roxmltree = "0.21.2"
 rusqlite = { version = "0.42.0", features = ["bundled", "functions"] }
+rust-embed = "8"
 rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs", "std"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }

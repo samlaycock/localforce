@@ -248,3 +248,35 @@ async fn ui_records_api() {
         .unwrap();
     assert_eq!(resp.status().as_u16(), 403);
 }
+
+#[tokio::test]
+async fn ui_pages_and_assets() {
+    let org = Org::start(Config::for_tests("").unwrap()).await;
+    let get = |path: &str| org.http.get(format!("{}{path}", org.base)).send();
+    // The app's own paths all serve its page, which routes in the browser.
+    for path in [
+        "/__localforce/ui/",
+        "/__localforce/ui/data/Account",
+        "/__localforce/ui/data/Account/fields",
+        "/__localforce/ui/log/3",
+    ] {
+        let resp = get(path).await.unwrap();
+        assert_eq!(resp.status().as_u16(), 200, "{path}");
+        assert_eq!(resp.headers()["cache-control"], "no-cache", "{path}");
+        assert!(resp.text().await.unwrap().contains(r#"<div id="root"></div>"#), "{path}");
+    }
+    // So do the script, stylesheet and fonts it loads, which never change.
+    let page = get("/__localforce/ui/").await.unwrap().text().await.unwrap();
+    let assets: Vec<&str> = page.split('"').filter(|s| s.starts_with("/__localforce/ui/assets/")).collect();
+    assert!(assets.iter().any(|a| a.ends_with(".js")) && assets.iter().any(|a| a.ends_with(".css")), "{page}");
+    for asset in assets {
+        let resp = get(asset).await.unwrap();
+        assert_eq!(resp.status().as_u16(), 200, "{asset}");
+        assert!(resp.headers()["cache-control"].to_str().unwrap().contains("immutable"), "{asset}");
+    }
+    assert_eq!(get("/__localforce/ui/favicon.svg").await.unwrap().status().as_u16(), 200);
+    // A missing file isn't the page.
+    for path in ["/__localforce/ui/assets/missing.js", "/__localforce/ui/missing.js"] {
+        assert_eq!(get(path).await.unwrap().status().as_u16(), 404, "{path}");
+    }
+}

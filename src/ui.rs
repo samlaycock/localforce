@@ -1,6 +1,11 @@
 //! The web UI, served at `/__localforce/ui/`, and the JSON API behind it
 //! under `/__localforce/api/`.
 //!
+//! The page is a React app in `ui/`, built into `ui/dist` and compiled into
+//! the binary. Every path under `/__localforce/ui/` that isn't one of its
+//! files serves its `index.html`, and the app routes in the browser. Debug
+//! builds read `ui/dist` from disk, so `bun run build` shows without a rebuild.
+//!
 //! The page edits records through the real REST API (with a session from
 //! `/__localforce/api/session`), so it sees exactly the validation and errors
 //! a client would. This API covers what Salesforce's doesn't: changing the
@@ -27,10 +32,9 @@ use crate::schema_admin::source_name;
 use crate::state::AppState;
 use crate::{describe, sfdx, soql, store};
 
-const INDEX_HTML: &str = include_str!("../ui/index.html");
-const APP_JS: &str = include_str!("../ui/app.js");
-const APP_CSS: &str = include_str!("../ui/app.css");
-const FAVICON: &str = include_str!("../ui/favicon.svg");
+#[derive(rust_embed::RustEmbed)]
+#[folder = "ui/dist/"]
+struct Dist;
 
 pub const API_VERSION: &str = "62.0";
 
@@ -54,25 +58,48 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(|| async { Redirect::to("/__localforce/ui/") }))
         .route("/__localforce/ui", get(|| async { Redirect::permanent("/__localforce/ui/") }))
-        .route("/__localforce/ui/", get(|| async { asset("index.html") }))
-        .route("/__localforce/ui/{name}", get(|Path(name): Path<String>| async move { asset(&name) }))
+        .route("/__localforce/ui/", get(|| async { page() }))
+        .route("/__localforce/ui/{*path}", get(|Path(path): Path<String>| async move { asset(&path) }))
         .nest("/__localforce/api", api)
 }
 
-/// An embedded file of the page. For working on the UI, `LOCALFORCE_UI_DIR`
-/// serves them from a directory instead, so changes show without a rebuild.
-fn asset(name: &str) -> Response {
-    let (embedded, content_type) = match name {
-        "index.html" => (INDEX_HTML, "text/html; charset=utf-8"),
-        "app.js" => (APP_JS, "text/javascript; charset=utf-8"),
-        "app.css" => (APP_CSS, "text/css; charset=utf-8"),
-        "favicon.svg" => (FAVICON, "image/svg+xml"),
-        _ => return StatusCode::NOT_FOUND.into_response(),
+/// The app's page. Revalidated every time, so an upgrade's new asset names are picked up.
+fn page() -> Response {
+    file("index.html", "no-cache")
+}
+
+/// One of the app's files, or the page itself for the app's own paths (`data/Account`).
+fn asset(path: &str) -> Response {
+    if path.split('/').any(|part| part == "..") {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    if path.starts_with("assets/") {
+        // Vite puts a content hash in every asset's name, so an asset never changes.
+        return file(path, "public, max-age=31536000, immutable");
+    }
+    if Dist::get(path).is_some() {
+        return file(path, "no-cache");
+    }
+    // A missing file (`foo.js`) is a 404; anything else is a page of the app.
+    if path.rsplit('/').next().is_some_and(|last| last.contains('.')) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    page()
+}
+
+fn file(path: &str, cache_control: &'static str) -> Response {
+    let Some(f) = Dist::get(path) else { return StatusCode::NOT_FOUND.into_response() };
+    let content_type = match path.rsplit_once('.').map(|(_, ext)| ext) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        Some("png") => "image/png",
+        _ => "application/octet-stream",
     };
-    let body = std::env::var_os("LOCALFORCE_UI_DIR")
-        .and_then(|dir| std::fs::read_to_string(std::path::Path::new(&dir).join(name)).ok())
-        .unwrap_or_else(|| embedded.to_owned());
-    ([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, "no-cache")], body).into_response()
+    ([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, cache_control)], f.data).into_response()
 }
 
 /// Refuse requests from other origins (a page on another site posting here).
