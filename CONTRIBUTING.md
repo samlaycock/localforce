@@ -21,7 +21,7 @@ describes it).
 | `sales.rs` | The sales objects' own logic: opportunity products, price books, contact roles, campaigns, contracts, orders and assets |
 | `bulk.rs`, `tooling.rs`, `soap.rs` | The Bulk APIs 2.0 and 1.0, the read-only Tooling API, and the Partner SOAP calls REST has no equivalent for |
 | `describe.rs`, `layouts.rs`, `listviews.rs`, `tabs.rs`, `explain.rs` | Describes, page layouts, list views, tabs and query plans |
-| `ui.rs`, `inspector.rs` | The web UI's JSON API and the API log. The page itself is `ui/` (plain HTML, CSS and JavaScript, embedded in the binary) |
+| `ui.rs`, `inspector.rs` | The web UI's JSON API and the API log. The page itself is a React app in `ui/`, built into `ui/dist` and embedded in the binary |
 
 [DESIGN.md](DESIGN.md) covers the architecture, the hard parts and the
 roadmap.
@@ -30,19 +30,21 @@ roadmap.
 
 You need a recent stable Rust toolchain. The SDK suites also need Node.js,
 Python with [uv](https://docs.astral.sh/uv/) and Go, and Node.js is needed for
-changesets.
+changesets. The web UI needs Node.js (22.22+, 24.11+ or 26+) and
+[Bun](https://bun.com), its package manager.
 
 ```sh
 cargo run                                    # HTTP on http://localhost:9600, HTTPS on https://localhost:9643
 cargo run -- --metadata ../my-app/force-app  # with a project's custom objects and fields
-LOCALFORCE_UI_DIR=ui cargo run               # serve ui/ from disk: edit and reload
 docker build -t localforce .                 # the release image
 scripts/docker-smoke.sh localforce
 ```
 
-The web UI's files are embedded at build time. While working on them, set
-`LOCALFORCE_UI_DIR` so a browser reload picks up changes without a rebuild.
-The page has no build step or dependencies.
+The web UI is a React app in `ui/`, built with stock shadcn/ui components.
+Its build output, `ui/dist`, is committed and compiled into the binary, so run
+`bun run check` and `bun run build` in `ui/` and commit `ui/dist` with any
+change to it. [`ui/README.md`](ui/README.md) covers working on it and its
+conventions.
 
 ## Testing
 
